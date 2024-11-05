@@ -1,0 +1,9 @@
+[package]
+name = "epub-reader"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+epub = { path = "./epub-rs" }
+serde_json = "1.0.132"
+tiny_http = "0.12.0"
