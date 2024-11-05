@@ -11,4 +11,4 @@ To embed a browser in a destktop application is stupid when the user already has
 # TODO
 
 - On the client (`src/index.js`) we could hijack relative links so that we
-  embed the target page instead. This way we keep are controls.
+  embed the target page instead. This way we keep our controls.
