@@ -2,9 +2,12 @@ use epub::doc::EpubDoc;
 use rinja::Template;
 use std::io::{Cursor, Read};
 use tiny_http::{Header, Method, Response, StatusCode};
+use util::*;
+
+mod util;
+
 
 const READER_JS: &str = include_str!("reader.js");
-const MIME_XHTML: &'static str = "application/xhtml+xml";
 
 #[derive(Debug, Template)]
 #[template(ext = "xhtml", path = "reader.xml")]
@@ -99,8 +102,8 @@ fn main() {
 
                 if let Some(idx) = book.resource_uri_to_chapter(&abs_url) {
                     // This is a page.
-                    println!("At idx: {idx}");
                     page_idx = idx;
+                    println!("At idx: {page_idx}");
 
                     assert!(book.set_current_page(page_idx));
                     let page_url = std::path::PathBuf::from("/content").join(book.get_current_path().unwrap());
@@ -111,7 +114,7 @@ fn main() {
                         page_url,
                     };
                     Response::from_string(rv.render().expect("thing inside thing"))
-                        .with_header(Header::from_bytes(b"Content-Type", MIME_XHTML).unwrap())
+                        .with_header(Header::from_bytes(b"Content-Type", mime::XHTML).unwrap())
                 } else {
                     let (Some(data), Some(mime)) = (
                         book.get_resource_by_path(&abs_url),
