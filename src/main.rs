@@ -8,11 +8,14 @@ mod util;
 
 
 const READER_JS: &str = include_str!("reader.js");
+const STYLES_CSS: &str = include_str!("styles.css");
+const CONTENT_STYLES_CSS: &str = include_str!("content_styles.css");
 
 #[derive(Debug, Template)]
 #[template(ext = "xhtml", path = "reader.xml")]
 struct Reader<'a> {
     title: &'a str,
+    styles: &'a str,
     reader_js: &'a str,
     page_url: &'a str,
 }
@@ -68,7 +71,7 @@ fn main() {
             (&Method::Get, "/") | (&Method::Get, "/reader") => {
                 book.set_current_page(page_idx);
                 let page_url = book.get_current_path().unwrap();
-                let page_url = book.root_base.join(page_url);
+                //let page_url = book.root_base.join(page_url);
                 // Redirect to page url
                 Response::from_data(&[])
                     .with_status_code(StatusCode(302))
@@ -86,6 +89,9 @@ fn main() {
                         continue;
                 };
 
+                let data = if mime == mime::XHTML || mime == mime::HTML {
+                   inject_styles(&data, CONTENT_STYLES_CSS)
+                } else { data }; 
                 Response::from_data(data).with_header(
                    Header::from_bytes(b"Content-Type", mime.as_bytes()).expect("no header?"),
                 )
@@ -110,6 +116,7 @@ fn main() {
                     let page_url = page_url.to_str().unwrap();
                     let rv = Reader {
                         title: "TODO",
+                        styles: STYLES_CSS,
                         reader_js: READER_JS,
                         page_url,
                     };
@@ -135,4 +142,36 @@ fn main() {
         };
         request.respond(response).unwrap();
     }
+}
+
+fn inject_styles(src: &[u8], css: &str) -> Vec<u8> {
+    use quick_xml::{Writer,Reader};
+    use quick_xml::events::{Event, BytesStart, BytesEnd, BytesText};
+    let src = std::str::from_utf8(src).expect("please use UTF8");
+    let mut reader = Reader::from_str(src);
+    let mut writer = Writer::new(Cursor::new(Vec::new()));
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::End(e)) if e.name().as_ref() == b"head" => {
+                let mut elem = BytesStart::new("style");
+                elem.push_attribute(("type", mime::CSS));
+                writer.write_event(Event::Start(elem)).expect("bruh");
+
+                let css = BytesText::new(css);
+                writer.write_event(Event::Text(css)).expect("please");
+
+                writer
+                    .write_event(Event::End(BytesEnd::new("style")))
+                    .expect("<3");
+                
+                writer.write_event(Event::End(e)).expect("is okay");
+            }
+            Ok(Event::Eof) => break,
+            Ok(e) => assert!(writer.write_event(e.borrow()).is_ok()),
+            Err(e) => panic!("XML parse error at position {}: {:?}", reader.error_position(), e),
+        }
+    }
+
+    writer.into_inner().into_inner()
 }

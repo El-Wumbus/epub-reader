@@ -10,5 +10,7 @@ To embed a browser in a destktop application is stupid when the user already has
 
 # TODO
 
-- On the client (`src/index.js`) we could hijack relative links so that we
-  embed the target page instead. This way we keep our controls.
+- Move xhtml manipulation to the server instead of having the logic in the client.
+  - Add custom stylesheets to the loaded page. It's loaded in an `iframe`, so
+    just placing it in the template won't do.
+  - Use the simple and fast XML parser I've used before ([`quick-xml`](https://lib.rs/quick-xml)).

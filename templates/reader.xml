@@ -18,6 +18,7 @@
                 bottom: 0;
                 top: 0px; 
             }
+            {{ styles }}
         </style>
     </head>
 

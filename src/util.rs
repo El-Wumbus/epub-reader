@@ -650,5 +650,7 @@ pub mod path {
 
 pub mod mime {
     pub const XHTML: &str = "application/xhtml+xml";
+    pub const HTML: &str = "text/html";
     pub const JSON: &str = "application/json"; 
+    pub const CSS: &str = "text/css";
 }

@@ -5,5 +5,6 @@ edition = "2021"
 
 [dependencies]
 epub = { path = "./epub-rs" }
+quick-xml = "0.37.0"
 rinja = { version = "0.3.5", default-features = false, features = ["humansize", "urlencode"] }
 tiny_http = "0.12.0"
