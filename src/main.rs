@@ -18,6 +18,8 @@ struct Reader<'a> {
     styles: &'a str,
     reader_js: &'a str,
     page_url: &'a str,
+    page_number: usize,
+    page_count: usize,
 }
 
 fn main() {
@@ -31,9 +33,10 @@ fn main() {
     let mut book_buffer = Vec::new();
     book.read_to_end(&mut book_buffer).expect("readable file");
     let mut book = EpubDoc::from_reader(Cursor::new(book_buffer)).expect("valid epub archive");
-    dbg!(&book.resources, &book.spine);
+    dbg!(&book.resources, &book.spine, &book.metadata);
+    let book_title = book.metadata.get("title").into_iter().flatten().map(|x|x.as_str()).next().unwrap_or("Book").to_string();
     let server = tiny_http::Server::http("localhost:6969").unwrap();
-
+    
     let mut page_idx = 0usize;
     let page_count = book.get_num_pages();
 
@@ -68,13 +71,13 @@ fn main() {
                 let path = path.strip_prefix(book.root_base.as_path()).unwrap();
                 Response::from_string(path.to_str().unwrap())
             }
-            (&Method::Get, "/") | (&Method::Get, "/reader") => {
+            (&Method::Get, "/") => {
                 book.set_current_page(page_idx);
                 let page_url = book.get_current_path().unwrap();
                 //let page_url = book.root_base.join(page_url);
                 // Redirect to page url
                 Response::from_data(&[])
-                    .with_status_code(StatusCode(302))
+                    .with_status_code(StatusCode(307))
                     .with_header(Header::from_bytes(b"location", page_url.as_os_str().as_encoded_bytes()).unwrap())
             }
             (&Method::Get, content) if content.starts_with("/content/") => {
@@ -115,10 +118,12 @@ fn main() {
                     let page_url = std::path::PathBuf::from("/content").join(book.get_current_path().unwrap());
                     let page_url = page_url.to_str().unwrap();
                     let rv = Reader {
-                        title: "TODO",
+                        title: &book_title,
                         styles: STYLES_CSS,
                         reader_js: READER_JS,
                         page_url,
+                        page_number: page_idx,
+                        page_count,
                     };
                     Response::from_string(rv.render().expect("thing inside thing"))
                         .with_header(Header::from_bytes(b"Content-Type", mime::XHTML).unwrap())

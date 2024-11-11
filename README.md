@@ -8,8 +8,15 @@ The work has already been done to render HTML, and that isn't my goal, so it's a
 To embed a browser in a destktop application is stupid when the user already has a web browser.
 
 
+# CHANGES
+
+- Browser's title is set appropriately
+- Page numbers
+- Fixed (maybe) content CSS styling (need to work on it more).
+
 # TODO
 
+- Allow page number to be selected via an HTML form/input.
 - Move xhtml manipulation to the server instead of having the logic in the client.
   - Add custom stylesheets to the loaded page. It's loaded in an `iframe`, so
     just placing it in the template won't do.

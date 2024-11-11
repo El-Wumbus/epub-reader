@@ -23,14 +23,30 @@
 --color-surface-mixed-a40: #7d7d7d;
 --color-surface-mixed-a50: #969696;
 
+--infobar-font-size: 16px;
+--infobar-font-family: Iosevka, sans-serif;
 }
 
-/*root: {
-    --black: #181C14;
-    --grey: #3C3D37;
-    --green: #697565;
-    --white: #ECDFCC;
-}*/
+#content {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: 0px;
+}
+
+#infobar {
+    position: fixed;
+    top: 0;
+    margin: 0.5em;
+    width: 8em;
+    font-size: var(--infobar-font-size);
+    font-family: var(--infobar-font-family);
+}
+
+#infobar #pagenumber::before {
+    content: "Page: ";
+}
 
 body, h1,h2,h3,h4,h5,h6 {
     color: var(--color-primary-a50); 
@@ -38,6 +54,6 @@ body, h1,h2,h3,h4,h5,h6 {
 }
 
 a {
-    color: var(--color-primary-a30) !important;
+    color: var(--color-primary-a30);
     /*text-decoration: underline !important;*/
 }

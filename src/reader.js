@@ -18,6 +18,20 @@ function get_cookie(cookies, name) {
     return null;
 }
 
+function set_font_size(sz) {
+    document.cookie = "content_font_size" + '=' + sz;
+    frame_style_root.style.setProperty(CSS_CONTENT_FONT_SIZE, sz + "px");
+    console.log("Set font size:", sz);
+}
+
+/*function update_pagenumber_display() {
+    fetch("/current-page", { method: "GET" })
+        .then((response) => response.text())
+        .then((text) => {
+            document.getElementById("pagenumber").innerText = text;
+        });
+}*/
+
 window.addEventListener("load", () => {
     // Load preferences from cookies;
     const cookies = document.cookie;
@@ -27,14 +41,9 @@ window.addEventListener("load", () => {
         content_font_size = parseInt(cookie_content_font_size);
         console.log("got font size:", content_font_size);
     }
-    
+//    update_pagenumber_display();
 });
 
-function set_font_size(sz) {
-    document.cookie = "content_font_size" + '=' + sz;
-    frame_style_root.style.setProperty(CSS_CONTENT_FONT_SIZE, sz + "px");
-    console.log("Set font size:", sz);
-}
 
 frame.addEventListener("load", () => {
     frame_style_root = frame.contentDocument.querySelector(':root');
@@ -68,6 +77,7 @@ window.addEventListener(
                     response.text().then((text) => {
                         console.log("Navigating to the previous page");
                         window.location.href = "/" + text;
+  //                      update_pagenumber_display();
                     });
                 });
                 break;
@@ -80,6 +90,7 @@ window.addEventListener(
                     response.text().then((text) => {
                         console.log("Navigating to the next page");
                         window.location.href = "/" + text;
+    //                    update_pagenumber_display();
                     });
                 });
                 break;
