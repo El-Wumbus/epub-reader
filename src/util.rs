@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+pub use self::either::Either;
+
 use std::{
     ffi::{OsStr, OsString},
     os::unix::ffi::OsStringExt,
@@ -280,10 +283,104 @@ mod tests {
     }
 }
 
+pub mod either {
+    pub use Either::{Left, Right};
+    #[derive(Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+    pub enum Either<L, R> {
+        /// A value of type `L`.
+        Left(L),
+        /// A value of type `R`.
+        Right(R),
+    }
+
+    impl<L: Clone, R: Clone> Clone for Either<L, R> {
+        fn clone(&self) -> Self {
+            match self {
+                Left(inner) => Left(inner.clone()),
+                Right(inner) => Right(inner.clone()),
+            }
+        }
+
+        fn clone_from(&mut self, source: &Self) {
+            match (self, source) {
+                (Left(dest), Left(source)) => dest.clone_from(source),
+                (Right(dest), Right(source)) => dest.clone_from(source),
+                (dest, source) => *dest = source.clone(),
+            }
+        }
+    }
+
+    impl<L, R> Either<L, R> {
+        /// Return true if the value is the `Left` variant.
+        ///
+        /// ```
+        /// use either::*;
+        ///
+        /// let values = [Left(1), Right("the right value")];
+        /// assert_eq!(values[0].is_left(), true);
+        /// assert_eq!(values[1].is_left(), false);
+        /// ```
+        pub fn is_left(&self) -> bool {
+            match *self {
+                Left(_) => true,
+                Right(_) => false,
+            }
+        }
+
+        /// Return true if the value is the `Right` variant.
+        ///
+        /// ```
+        /// use either::*;
+        ///
+        /// let values = [Left(1), Right("the right value")];
+        /// assert_eq!(values[0].is_right(), false);
+        /// assert_eq!(values[1].is_right(), true);
+        /// ```
+        pub fn is_right(&self) -> bool {
+            !self.is_left()
+        }
+
+        /// Convert the left side of `Either<L, R>` to an `Option<L>`.
+        ///
+        /// ```
+        /// use either::*;
+        ///
+        /// let left: Either<_, ()> = Left("some value");
+        /// assert_eq!(left.left(),  Some("some value"));
+        ///
+        /// let right: Either<(), _> = Right(321);
+        /// assert_eq!(right.left(), None);
+        /// ```
+        pub fn left(self) -> Option<L> {
+            match self {
+                Left(l) => Some(l),
+                Right(_) => None,
+            }
+        }
+
+        /// Convert the right side of `Either<L, R>` to an `Option<R>`.
+        ///
+        /// ```
+        /// use either::*;
+        ///
+        /// let left: Either<_, ()> = Left("some value");
+        /// assert_eq!(left.right(),  None);
+        ///
+        /// let right: Either<(), _> = Right(321);
+        /// assert_eq!(right.right(), Some(321));
+        /// ```
+        pub fn right(self) -> Option<R> {
+            match self {
+                Left(_) => None,
+                Right(r) => Some(r),
+            }
+        }
+    }
+}
+
 pub mod path {
     /// From <https://github.com/rescrv/blue/blob/main/utf8path>.
     /// Modifications made
-
     use std::borrow::{Borrow, Cow};
     use std::path::PathBuf;
 
@@ -651,6 +748,6 @@ pub mod path {
 pub mod mime {
     pub const XHTML: &str = "application/xhtml+xml";
     pub const HTML: &str = "text/html";
-    pub const JSON: &str = "application/json"; 
+    pub const JSON: &str = "application/json";
     pub const CSS: &str = "text/css";
 }

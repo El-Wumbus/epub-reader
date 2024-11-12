@@ -11,16 +11,19 @@
                 height: 100%;
                 overflow: hidden;
             }
-            {{ styles }}
+            {{ stylesheet }}
         </style>
     </head>
 
-    <body>
+    <body onload="pageform.reset();">
         <div id="content">
             <iframe id="pageframe" width="100%" height="100%" frameborder="0" src="{{ page_url }}"></iframe>
         </div>
         <div id="infobar">
-            <div id="pagenumber">{{page_number}} / {{page_count}}</div>
+            <div id="pagenumber">
+                    <form id="pageform" action="javascript:navigate_to_page();" onSubmit="console.log(this)">
+                        <input id="pageinput" type="text" name="page" value="{{current_page}}"/>
+                    </form>/ {{page_count}}</div>
         </div>
     </body>
     <script type="application/javascript">

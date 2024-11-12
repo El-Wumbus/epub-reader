@@ -1,0 +1,51 @@
+    :root {
+        /** Dark theme primary colors */
+        --color-primary-a0: #f6f5f4;
+        --color-primary-a10: #f7f6f5;
+        --color-primary-a20: #f8f7f6;
+        --color-primary-a30: #f9f8f8;
+        --color-primary-a40: #faf9f9;
+        --color-primary-a50: #fbfbfa;
+
+        /** Dark theme surface colors */
+        --color-surface-a0: #121212;
+        --color-surface-a10: #282828;
+        --color-surface-a20: #3f3f3f;
+        --color-surface-a30: #575757;
+        --color-surface-a40: #717171;
+        --color-surface-a50: #8b8b8b;
+
+        /** Dark theme mixed surface colors */
+        --color-surface-mixed-a0: #252525;
+        --color-surface-mixed-a10: #393939;
+        --color-surface-mixed-a20: #4f4f4f;
+        --color-surface-mixed-a30: #666666;
+        --color-surface-mixed-a40: #7d7d7d;
+        --color-surface-mixed-a50: #969696;
+
+        /** Configurables */
+
+        --background-color: var(--color-surface-a0);
+        --foreground-color: var(--color-primary-a50);
+        --content-width: 45em;
+        /*--content-width: 95%;*/
+        --content-font-size: {{ font_size_px }}px;
+        --content-font-family: Iosevka, sans-serif;
+
+        width: var(--content-width);
+    }
+
+    body {
+        background-color: var(--color-surface-a0) !important;
+    }
+    body,
+    p {
+        color: var(--color-primary-a50) !important;
+        font-family: var(--content-font-family) !important;
+        font-size: var(--content-font-size) !important;
+    }
+    
+    a {
+        color: var(--color-primary-a30) !important;
+        /*text-decoration: underline !important;*/
+    }

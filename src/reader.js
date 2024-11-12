@@ -1,114 +1,107 @@
-const cookies = document.cookie;
-const cookie_content_font_size = get_cookie(cookies, "content_font_size");
-let content_font_size = (cookie_content_font_size) ? parseInt(cookie_content_font_size) : 16;
+const API = {
+    NEXT_PAGE: "/api/next-page",
+    PREV_PAGE: "/api/prev-page",
+    CURRENT_PAGE: "/api/current-page",
+    INCREASE_FONT_SIZE: "/api/increase-font-size",
+    DECREASE_FONT_SIZE: "/api/decrease-font-size",
+    INVERT_TEXT_COLOR: "/api/invert-text-color",
+};
 
-const CSS_CONTENT_FONT_SIZE = "--content-font-size";
-const frame = document.getElementById("pageframe");
-let frame_style_root = undefined;
-
-function get_cookie(cookies, name) {
-    const dcookies = decodeURIComponent(cookies);
-    const look_for = name + "=";
-    for (let cookie of dcookies.split(';')) {
-        cookie = cookie.trim();
-        if (cookie.indexOf(look_for) == 0) {
-            return cookie.substring(look_for.length, cookie.length);
-        }
-    }
-    return null;
+async function api_next_page() {
+    const response = await fetch(API.NEXT_PAGE, { method: "POST" });
+    const text = await response.text();
+    console.log("Moving to next page: ", text);
+    return text;
 }
 
-function set_font_size(sz) {
-    document.cookie = "content_font_size" + '=' + sz;
-    frame_style_root.style.setProperty(CSS_CONTENT_FONT_SIZE, sz + "px");
-    console.log("Set font size:", sz);
+async function api_prev_page() {
+    const response = await fetch(API.PREV_PAGE, { method: "POST" });
+    const text = await response.text();
+    console.log("Moving to previous page: ", text);
+    return text;
 }
 
-/*function update_pagenumber_display() {
-    fetch("/current-page", { method: "GET" })
-        .then((response) => response.text())
-        .then((text) => {
-            document.getElementById("pagenumber").innerText = text;
-        });
-}*/
+async function api_current_page(page) {
+    const response = await fetch(API.CURRENT_PAGE, {
+        method: "POST",
+        body: page,
+    });
+    const text = await response.text();
+    return text;
+}
 
-window.addEventListener("load", () => {
-    // Load preferences from cookies;
-    const cookies = document.cookie;
-    console.log(cookies);
-    const cookie_content_font_size = get_cookie(cookies, "content_font_size");
-    if (cookie_content_font_size) {
-        content_font_size = parseInt(cookie_content_font_size);
-        console.log("got font size:", content_font_size);
+async function api_increase_font_size() {
+    const response = await fetch(API.INCREASE_FONT_SIZE, { method: "POST" });
+    if (response.ok) {
+        console.log("Increased font size");
     }
-//    update_pagenumber_display();
-});
+}
 
-
-frame.addEventListener("load", () => {
-    frame_style_root = frame.contentDocument.querySelector(':root');
-    //set_font_size(content_font_size);
-    
-    // Replace every link with a corrected version of it.
-    for (const link of frame.contentDocument.links) {
-        if (link.href.includes("content/")) {
-            const betterlink = link.href.replace("content/", "");
-            link.href = betterlink;
-            link.target = "_top" // HTML is stupid and links don't work unless we do this.
-        }
+async function api_decrease_font_size() {
+    const response = await fetch(API.DECREASE_FONT_SIZE, { method: "POST" });
+    if (response.ok) {
+        console.log("Decreased font size");
     }
-});
+}
 
+async function api_invert_text_color() {
+    const response = await fetch(API.INVERT_TEXT_COLOR, { method: "POST" });
+    if (response.ok) {
+        console.log("Inverted text color");
+    }
+}
 
+// This is called by the reader.xml
+async function navigate_to_page() {
+    const page = await api_current_page(document.getElementById("pageinput").value);
+    location.href = location.origin + "/" + page;
+}
+
+async function keybinds(key) {
+    switch (key) {
+        case "ArrowLeft":
+            location.href = "/" + (await api_prev_page());
+            break;
+        case "ArrowRight":
+            location.href = "/" + (await api_next_page());
+            break;
+        case "=":
+            await api_increase_font_size();
+            location.reload();
+            break;
+        case "-":
+            await api_decrease_font_size();
+            location.reload();
+            break;
+        default:
+            return;
+    }
+}
 
 window.addEventListener(
     "keydown",
     (event) => {
         if (event.defaultPrevented) {
-            return; // Do nothing if event already handled
+            return;
         }
-        console.log("Key pressed:", event.key);
-        switch (event.key) {
-            case "ArrowLeft":
-                fetch("/prev-page", {
-                    method: "POST",
-                    body: "",
-                }).then((response) => {
-                    response.text().then((text) => {
-                        console.log("Navigating to the previous page");
-                        window.location.href = "/" + text;
-  //                      update_pagenumber_display();
-                    });
-                });
-                break;
-
-            case "ArrowRight":
-                fetch("/next-page", {
-                    method: "POST",
-                    body: "",
-                }).then((response) => {
-                    response.text().then((text) => {
-                        console.log("Navigating to the next page");
-                        window.location.href = "/" + text;
-    //                    update_pagenumber_display();
-                    });
-                });
-                break;
-            case "=":
-                content_font_size += 2;
-                set_font_size(content_font_size);
-                break;
-            case "-":
-                if (content_font_size -2 > 1) {
-                    content_font_size -= 2;
-                }
-                set_font_size(content_font_size);
-                break;
-            default:
-                return;
-        }
-        //event.preventDefault();
+        keybinds(event.key);
     },
-    // true
 );
 
+//TODO: move this to the server
+const frame = document.getElementById("pageframe");
+frame.addEventListener("load", () => {
+
+    // Replace every link with a corrected version of it.
+    for (const link of frame.contentDocument.links) {
+        if (link.href.includes("content/")) {
+            const betterlink = link.href.replace("content/", "");
+            link.href = betterlink;
+            link.target = "_top"; // HTML is stupid and links don't work unless we do this.
+        }
+    }
+});
+
+/*window.addEventListener("load", () => {
+    // Load preferences from cookies;
+});*/

@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+env_logger = "0.11.5"
 epub = { path = "./epub-rs" }
+log = "0.4.22"
 quick-xml = "0.37.0"
 rinja = { version = "0.3.5", default-features = false, features = ["humansize", "urlencode"] }
 tiny_http = "0.12.0"

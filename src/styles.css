@@ -23,34 +23,69 @@
 --color-surface-mixed-a40: #7d7d7d;
 --color-surface-mixed-a50: #969696;
 
---infobar-font-size: 16px;
+
+/** Dynamic variables */
+
+--background-color: var(--color-surface-a0);
+--foreground-color: var(--color-primary-a50);
+
+--infobar-font-size: 18px;
 --infobar-font-family: Iosevka, sans-serif;
+--infobar-width: 5em;
+--infobar-margin: 0.2em;
+--pageinput-width: 1.5em;
+--infobar-size: calc(var(--infobar-width) + var(--infobar-margin));
+
+--content-width: 45em;
+}
+
+:root {
+    width: 100%;
+}
+
+form, input {
+    display: inline;
+    border: none;
+    align: left;
+    font-size: var(--infobar-font-size);
+    font-family: var(--infobar-font-family);
+    padding: 0;
+    margin: 0;
+    background: solid;
+    background-color: var(--background-color);
+}
+p {
+    padding: 0;
+    margin: 0;
+}
+
+#pageinput {
+    width: var(--pageinput-width);
+    text-align: right;
 }
 
 #content {
+    --left: max(var(--infobar-size), calc(50% - (var(--content-width) / 2)));
     position: absolute;
-    left: 0;
-    right: 0;
+    top: 0;
     bottom: 0;
-    top: 0px;
+    right: 0; /* The scrollbar of the iframe should be at the rightmost point
+                 The content should be left aligned to allow this to be possible. */
+    left: var(--left);
 }
 
 #infobar {
     position: fixed;
     top: 0;
-    margin: 0.5em;
-    width: 8em;
+    margin: var(--infobar-margin);
+    width: var(--infobar-width);
     font-size: var(--infobar-font-size);
     font-family: var(--infobar-font-family);
 }
 
-#infobar #pagenumber::before {
-    content: "Page: ";
-}
-
-body, h1,h2,h3,h4,h5,h6 {
-    color: var(--color-primary-a50); 
-    background-color: var(--color-surface-a0); 
+body,form, input, h1,h2,h3,h4,h5,h6 {
+    color: var(--foreground-color); 
+    background-color: var(--background-color); 
 }
 
 a {
