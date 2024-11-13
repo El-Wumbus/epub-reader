@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "reader",
-    "epub-rs"
+    "epub-rs",
+    "xdg-utils",
 ]
 

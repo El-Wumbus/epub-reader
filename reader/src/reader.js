@@ -1,46 +1,26 @@
 const API = {
-    NEXT_PAGE: "/api/next-page",
-    PREV_PAGE: "/api/prev-page",
-    CURRENT_PAGE: "/api/current-page",
-    INCREASE_FONT_SIZE: "/api/increase-font-size",
-    DECREASE_FONT_SIZE: "/api/decrease-font-size",
+    PAGE: "/api/page",
+    FONT_SIZE: "/api/font-size",
     INVERT_TEXT_COLOR: "/api/invert-text-color",
+    CONTENT_WIDTH: "/api/content-width",
 };
 
-async function api_next_page() {
-    const response = await fetch(API.NEXT_PAGE, { method: "POST" });
-    const text = await response.text();
-    console.log("Moving to next page: ", text);
-    return text;
-}
-
-async function api_prev_page() {
-    const response = await fetch(API.PREV_PAGE, { method: "POST" });
-    const text = await response.text();
-    console.log("Moving to previous page: ", text);
-    return text;
-}
-
-async function api_current_page(page) {
-    const response = await fetch(API.CURRENT_PAGE, {
+async function api_page(action) {
+    const response = await fetch(API.PAGE, {
         method: "POST",
-        body: page,
+        body: action,
     });
     const text = await response.text();
     return text;
 }
 
-async function api_increase_font_size() {
-    const response = await fetch(API.INCREASE_FONT_SIZE, { method: "POST" });
+async function api_font_size(action) {
+    const response = await fetch(API.FONT_SIZE, {
+        method: "POST",
+        body: action,
+    });
     if (response.ok) {
-        console.log("Increased font size");
-    }
-}
-
-async function api_decrease_font_size() {
-    const response = await fetch(API.DECREASE_FONT_SIZE, { method: "POST" });
-    if (response.ok) {
-        console.log("Decreased font size");
+        console.log("Adjusted font size");
     }
 }
 
@@ -51,30 +31,48 @@ async function api_invert_text_color() {
     }
 }
 
+async function api_content_width(action) {
+    const response = await fetch(API.CONTENT_WIDTH, {
+        method: "POST",
+        body: action,
+    });
+    if (response.ok) {
+        console.log("Adjusted content width");
+    }
+}
+
 // This is called by the reader.xml
 async function navigate_to_page() {
-    const page = await api_current_page(document.getElementById("pageinput").value);
+    const page = await api_page(document.getElementById("pageinput").value);
     location.href = location.origin + "/" + page;
 }
 
 async function keybinds(key) {
     switch (key) {
         case "ArrowLeft":
-            location.href = "/" + (await api_prev_page());
+            location.href = "/" + (await api_page("-"));
             break;
         case "ArrowRight":
-            location.href = "/" + (await api_next_page());
+            location.href = "/" + (await api_page("+"));
             break;
         case "=":
-            await api_increase_font_size();
+            await api_font_size("+");
             location.reload();
             break;
         case "-":
-            await api_decrease_font_size();
+            await api_font_size("-");
             location.reload();
             break;
         case "!":
             await api_invert_text_color();
+            location.reload();
+            break;
+        case "[":
+            await api_content_width("-");
+            location.reload();
+            break;
+        case "]":
+            await api_content_width("+");
             location.reload();
             break;
         default:
@@ -82,20 +80,23 @@ async function keybinds(key) {
     }
 }
 
-window.addEventListener(
-    "keydown",
-    (event) => {
-        if (event.defaultPrevented) {
-            return;
-        }
-        keybinds(event.key);
-    },
-);
-
-//TODO: move this to the server
 const frame = document.getElementById("pageframe");
-frame.addEventListener("load", () => {
 
+window.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented) {
+        return;
+    }
+    keybinds(event.key);
+});
+
+frame.addEventListener("keydown", (event) => {
+    if (event.defaultPrevented) {
+        return;
+    }
+    keybinds(event.key);
+});
+//TODO: move this to the server
+frame.addEventListener("load", () => {
     // Replace every link with a corrected version of it.
     for (const link of frame.contentDocument.links) {
         if (link.href.includes("content/")) {
@@ -109,3 +110,4 @@ frame.addEventListener("load", () => {
 /*window.addEventListener("load", () => {
     // Load preferences from cookies;
 });*/
+

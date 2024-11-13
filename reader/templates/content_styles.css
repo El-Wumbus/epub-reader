@@ -25,17 +25,21 @@
 
         /** Configurables */
 
-        --background-color: {{ bg_color }};
-        --foreground-color: {{ fg_color }};
-        --content-width: 45em;
-        /*--content-width: 95%;*/
-        --content-font-size: {{ font_size_px }}px;
+        --background-color: {{ variables.bg_color }};
+        --foreground-color: {{ variables.fg_color }};
+        --content-width: {{ variables.content_width_em }}em;
+        --content-font-size: {{ variables.content_font_size_px }}px;
         --content-font-family: Iosevka, sans-serif;
-
-        width: var(--content-width);
+        
+/* TODO disallow overlap between infobar and content*/
     }
 
     body {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        right: calc(50% - var(--content-width) / 2);
+        left: calc(50% - var(--content-width) / 2);
         background-color: var(--background-color) !important;
     }
     body,

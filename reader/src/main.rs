@@ -1,14 +1,14 @@
 use epub::doc::EpubDoc;
 use log::{debug, error, info};
 use rinja::Template;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write as _};
 use tiny_http::{Header, Method, Request, Response, StatusCode};
 use util::*;
-
+use std::path::PathBuf;
+use serde::{Serialize, Deserialize};
 mod util;
 
 const READER_JS: &str = include_str!("reader.js");
-//const STYLES_CSS: &str = include_str!("styles.css");
 
 #[derive(Debug, Template)]
 #[template(ext = "xhtml", path = "reader.xml")]
@@ -21,55 +21,50 @@ struct Reader<'a> {
     page_count: usize,
 }
 
-#[derive(Debug, Clone, Template)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct CSSVariables<'a> {
+    fg_color: &'a str,
+    bg_color: &'a str,
+    content_width_em: f32,
+    content_font_size_px: u32,
+}
+
+impl<'a> Default for CSSVariables<'a> {
+    fn default() -> Self {
+        Self {
+            fg_color: "var(--color-primary-a50)",
+            bg_color: "var(--color-surface-a0)",
+            content_font_size_px: 21,
+            content_width_em: 36.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Template)]
 #[template(path = "content_styles.css", escape = "none")]
-struct ContentStyles {
-    font_size_px: usize,
-    fg_color: String,
-    bg_color: String,
+struct ContentStyles<'a> {
+    variables: CSSVariables<'a>,
 }
 
-impl Default for ContentStyles {
-    fn default() -> Self {
-        Self {
-            font_size_px: 20,
-            fg_color: "var(--color-primary-a50)".to_string(),
-            bg_color: "var(--color-surface-a0)".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Template)]
+#[derive(Debug, Clone, Default, Template)]
 #[template(path = "reader.css", escape = "none")]
-struct ReaderStyles {
-    fg_color: String,
-    bg_color: String,
+struct ReaderStyles<'a> {
+    variables: CSSVariables<'a>,
 }
 
-impl Default for ReaderStyles {
-    fn default() -> Self {
-        Self {
-            fg_color: "var(--color-primary-a50)".to_string(),
-            bg_color: "var(--color-surface-a0)".to_string(),
-        }
-    }
-}
-
-struct BookState<R: std::io::Read + std::io::Seek> {
+struct BookState<'a, R: std::io::Read + std::io::Seek> {
     book: EpubDoc<R>,
-    content_styles: ContentStyles,
-    reader_styles: ReaderStyles,
+    css_variables: CSSVariables<'a>,
     current_page: usize,
     page_count: usize,
 }
 
-impl<R: std::io::Read + std::io::Seek> BookState<R> {
+impl<'a, R: std::io::Read + std::io::Seek> BookState<'a, R> {
     fn new(book: EpubDoc<R>) -> Self {
         let page_count = book.get_num_pages();
         Self {
             book,
-            content_styles: ContentStyles::default(),
-            reader_styles: ReaderStyles::default(),
+            css_variables: CSSVariables::default(),
             current_page: 0,
             page_count,
         }
@@ -79,15 +74,13 @@ impl<R: std::io::Read + std::io::Seek> BookState<R> {
         &mut self,
         pred: impl Fn(usize, usize) -> usize,
     ) -> Result<Response<Cursor<Vec<u8>>>, ()> {
-        self.current_page = pred(self.current_page, self.page_count);
+        self.current_page = pred(self.current_page, self.page_count).clamp(0, self.page_count - 1);
+
         assert!(
             self.book.set_current_page(self.current_page),
             "page index should be valid"
         );
         let path = self.book.get_current_path().ok_or(())?;
-        //let path = path
-        // .strip_prefix(&self.book.root_base)
-        // .expect("page_path to be prefixed with the base path");
         let path = path.to_str().unwrap();
         info!(
             "Moved to page: {}/{} at path \"{}\"",
@@ -99,9 +92,41 @@ impl<R: std::io::Read + std::io::Seek> BookState<R> {
     }
 }
 
+
+#[derive(Debug, Clone, Default,Serialize, Deserialize)]
+#[serde(default)]
+struct Config<'a> {
+    #[serde(borrow)]
+    css_variables: CSSVariables<'a>,
+}
+
 fn main() {
     let mut builder = env_logger::Builder::new();
     builder.filter_level(log::LevelFilter::Debug).init();
+    
+    let config_home = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| {
+        PathBuf::from(std::env::var_os("HOME").expect("home env")).join(".config")
+    });
+    let config_file = config_home.join("epub-reader").join("config.ron");
+
+    debug!("Using \"{}\" as config file", config_file.display());
+    let config = if !config_file.exists() {
+        let config = Config::default();
+        let config_s = ron::ser::to_string_pretty(&config, ron::ser::PrettyConfig::new()).unwrap();
+        if let Some(parent) = config_file.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent).expect("create parent dir");
+            }
+        }
+        let mut config_f = std::fs::File::create(&config_file).unwrap();
+        config_f.write_all(config_s.as_bytes()).unwrap();
+        config
+    } else {
+        let config_s = std::fs::read_to_string(&config_file).unwrap();
+        let config_bs = Box::leak(Box::new(config_s));
+        let config = ron::de::from_str(config_bs).expect("proper config file");
+        config
+    };
 
     let args = std::env::args();
     let book = args
@@ -127,7 +152,10 @@ fn main() {
         .next()
         .unwrap_or("Missing Title")
         .to_string();
+
     let mut state = BookState::new(book);
+    state.css_variables = config.css_variables;
+
     let server = tiny_http::Server::http("localhost:6969").unwrap();
 
     loop {
@@ -147,73 +175,103 @@ fn main() {
         );
 
         let response = match (request_method, request_url.as_str()) {
-            (&Method::Post, "/api/next-page") => {
-                match state.change_page(|page, page_count| {
-                    if page + 1 < page_count {
-                        page + 1
-                    } else {
-                        page
+            (&Method::Post, "/api/page") => {
+                let mut req_body = String::new();
+                request.as_reader().read_to_string(&mut req_body).unwrap();
+
+                match req_body.trim() {
+                    "+" => match state.change_page(|page, page_count| {
+                        if page + 1 < page_count {
+                            page + 1
+                        } else {
+                            page
+                        }
+                    }) {
+                        Ok(r) => r,
+                        Err(_) => rcode(500),
+                    },
+                    "-" => {
+                        match state.change_page(|page, _| if page != 0 { page - 1 } else { page }) {
+                            Ok(r) => r,
+                            Err(_) => rcode(500),
+                        }
                     }
-                }) {
-                    Ok(r) => r,
-                    Err(_) => {
-                        respond(request, rcode(500));
-                        continue;
+                    _ => {
+                        let Ok(page) = req_body.parse::<usize>() else {
+                            respond(request, rcode(400));
+                            continue;
+                        };
+                        let Ok(r) = state.change_page(|_, _| page.max(1) - 1) else {
+                            respond(request, rcode(500));
+                            continue;
+                        };
+                        r
                     }
                 }
             }
-            (&Method::Post, "/api/prev-page") => {
-                match state.change_page(|page, _| if page != 0 { page - 1 } else { page }) {
-                    Ok(r) => r,
-                    Err(_) => {
-                        respond(request, rcode(500));
-                        continue;
+            (Method::Post, "/api/font-size") => {
+                let mut req_body = String::new();
+                request.as_reader().read_to_string(&mut req_body).unwrap();
+                match req_body.trim() {
+                    "+" => {
+                        state.css_variables.content_font_size_px += 2;
+                        info!(
+                            "Increasing font size from {} to {}",
+                            state.css_variables.content_font_size_px - 2,
+                            state.css_variables.content_font_size_px
+                        );
+                        rcode(200)
                     }
+                    "-" => {
+                        if state.css_variables.content_font_size_px - 2 != 0 {
+                            state.css_variables.content_font_size_px -= 2;
+                        };
+                        info!(
+                            "Decreasing font size from {} to {}",
+                            state.css_variables.content_font_size_px + 2,
+                            state.css_variables.content_font_size_px
+                        );
+                        rcode(200)
+                    }
+                    _ => rcode(400),
                 }
-            }
-            (&Method::Post, "/api/current-page") => {
-                let mut page = String::new();
-                request.as_reader().read_to_string(&mut page).unwrap();
-                let Ok(page) = page.parse::<usize>() else {
-                    respond(request, rcode(500));
-                    continue;
-                };
-                let Ok(r) = state.change_page(|_, _| page - 1) else {
-                    respond(request, rcode(500));
-                    continue;
-                };
-                r
-            }
-            (Method::Post, "/api/increase-font-size") => {
-                state.content_styles.font_size_px += 2;
-                info!(
-                    "Increasing font size from {} to {}",
-                    state.content_styles.font_size_px - 2,
-                    state.content_styles.font_size_px
-                );
-                rcode(200)
-            }
-            (Method::Post, "/api/decrease-font-size") => {
-                if state.content_styles.font_size_px - 2 != 0 {
-                    state.content_styles.font_size_px -= 2
-                };
-                info!(
-                    "Decreasing font size from {} to {}",
-                    state.content_styles.font_size_px + 2,
-                    state.content_styles.font_size_px
-                );
-                rcode(200)
             }
             (Method::Post, "/api/invert-text-color") => {
-                let cbg = state.content_styles.bg_color;
-                state.content_styles.bg_color = state.content_styles.fg_color;
-                state.content_styles.fg_color = cbg;
-                let rbg = state.reader_styles.bg_color;
-                state.reader_styles.bg_color = state.reader_styles.fg_color;
-                state.reader_styles.fg_color = rbg;
-                debug!("Inverted content styles: {:?}", state.content_styles);
+                let bg = state.css_variables.bg_color;
+                state.css_variables.bg_color = state.css_variables.fg_color;
+                state.css_variables.fg_color = bg;
+                debug!("Inverted content styles: {:?}", state.css_variables);
                 info!("Inverted text color");
                 rcode(200)
+            }
+            (Method::Post, "/api/content-width") => {
+                let mut req_body = String::new();
+                request
+                    .as_reader()
+                    .read_to_string(&mut req_body)
+                    .expect("the client should send a string");
+
+                match req_body.trim() {
+                    "+" => {
+                        state.css_variables.content_width_em += 1.0;
+                        info!(
+                            "Increased content width to {}",
+                            state.css_variables.content_width_em
+                        );
+                        rcode(200)
+                    }
+                    "-" => {
+                        if state.css_variables.content_width_em > 20.0 {
+                            state.css_variables.content_width_em -= 1.0;
+                        }
+                        info!(
+                            "Increased content width to {}",
+                            state.css_variables.content_width_em
+                        );
+                        rcode(200)
+                    }
+                    _ => rcode(400),
+                }
             }
             (&Method::Get, "/") => {
                 assert!(state.book.set_current_page(state.current_page));
@@ -240,14 +298,14 @@ fn main() {
                 };
 
                 let data = if mime == mime::XHTML || mime == mime::HTML {
-                    let content_styles = state
-                        .content_styles
-                        .render()
-                        .expect("be a good template pls");
+                    let content_styles = ContentStyles {
+                        variables: state.css_variables,
+                    }
+                    .render()
+                    .unwrap();
                     debug!("rendered content styles: {content_styles}");
                     let data = std::str::from_utf8(&data).unwrap();
-                    inject_styles2(&data, &content_styles).into_bytes()
-                    //inject_styles(&data, &content_styles)
+                    inject_styles(&data, &content_styles).into_bytes()
                 } else {
                     data
                 };
@@ -285,8 +343,12 @@ fn main() {
                     };
                     let page_url = std::path::PathBuf::from("/content").join(page_path);
                     let page_url = page_url.to_str().unwrap();
-                    
-                    let stylesheet = state.reader_styles.render().unwrap();
+
+                    let stylesheet = ReaderStyles {
+                        variables: state.css_variables,
+                    }
+                    .render()
+                    .unwrap();
                     let rv = Reader {
                         title: &book_title,
                         stylesheet: &stylesheet,
@@ -319,7 +381,7 @@ fn main() {
     }
 }
 
-fn inject_styles2(src: &str, stylesheet: &str) -> String {
+fn inject_styles(src: &str, stylesheet: &str) -> String {
     use xmlparser::{ElementEnd, Token};
     let mut output = String::with_capacity(src.len() + stylesheet.len());
     for token in xmlparser::Tokenizer::from(src) {

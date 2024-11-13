@@ -25,9 +25,9 @@
 
 
 /** Dynamic variables */
-
---background-color: {{ bg_color }};
---foreground-color: {{ fg_color }};
+--background-color: {{ variables.bg_color }};
+--foreground-color: {{ variables.fg_color }};
+--content-width: {{ variables.content_width_em }}em;
 
 --infobar-font-size: 18px;
 --infobar-font-family: Iosevka, sans-serif;
@@ -36,7 +36,6 @@
 --pageinput-width: 1.5em;
 --infobar-size: calc(var(--infobar-width) + var(--infobar-margin));
 
---content-width: 45em;
 }
 
 :root {
@@ -54,6 +53,7 @@ form, input {
     background: solid;
     background-color: var(--background-color);
 }
+
 p {
     padding: 0;
     margin: 0;
@@ -65,13 +65,11 @@ p {
 }
 
 #content {
-    --left: max(var(--infobar-size), calc(50% - (var(--content-width) / 2)));
     position: absolute;
     top: 0;
     bottom: 0;
-    right: 0; /* The scrollbar of the iframe should be at the rightmost point
-                 The content should be left aligned to allow this to be possible. */
-    left: var(--left);
+    right: 0;
+    left: 0;
 }
 
 #infobar {
