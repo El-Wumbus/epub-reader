@@ -73,6 +73,10 @@ async function keybinds(key) {
             await api_decrease_font_size();
             location.reload();
             break;
+        case "!":
+            await api_invert_text_color();
+            location.reload();
+            break;
         default:
             return;
     }

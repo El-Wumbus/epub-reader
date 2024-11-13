@@ -25,8 +25,8 @@
 
         /** Configurables */
 
-        --background-color: var(--color-surface-a0);
-        --foreground-color: var(--color-primary-a50);
+        --background-color: {{ bg_color }};
+        --foreground-color: {{ fg_color }};
         --content-width: 45em;
         /*--content-width: 95%;*/
         --content-font-size: {{ font_size_px }}px;
@@ -36,16 +36,16 @@
     }
 
     body {
-        background-color: var(--color-surface-a0) !important;
+        background-color: var(--background-color) !important;
     }
     body,
     p {
-        color: var(--color-primary-a50) !important;
+        color: var(--foreground-color) !important;
         font-family: var(--content-font-family) !important;
         font-size: var(--content-font-size) !important;
     }
     
     a {
-        color: var(--color-primary-a30) !important;
+        color: var(--foreground-color) !important;
         /*text-decoration: underline !important;*/
     }

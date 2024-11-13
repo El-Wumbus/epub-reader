@@ -8,7 +8,7 @@ use util::*;
 mod util;
 
 const READER_JS: &str = include_str!("reader.js");
-const STYLES_CSS: &str = include_str!("styles.css");
+//const STYLES_CSS: &str = include_str!("styles.css");
 
 #[derive(Debug, Template)]
 #[template(ext = "xhtml", path = "reader.xml")]
@@ -39,9 +39,26 @@ impl Default for ContentStyles {
     }
 }
 
+#[derive(Debug, Clone, Template)]
+#[template(path = "reader.css", escape = "none")]
+struct ReaderStyles {
+    fg_color: String,
+    bg_color: String,
+}
+
+impl Default for ReaderStyles {
+    fn default() -> Self {
+        Self {
+            fg_color: "var(--color-primary-a50)".to_string(),
+            bg_color: "var(--color-surface-a0)".to_string(),
+        }
+    }
+}
+
 struct BookState<R: std::io::Read + std::io::Seek> {
     book: EpubDoc<R>,
     content_styles: ContentStyles,
+    reader_styles: ReaderStyles,
     current_page: usize,
     page_count: usize,
 }
@@ -52,6 +69,7 @@ impl<R: std::io::Read + std::io::Seek> BookState<R> {
         Self {
             book,
             content_styles: ContentStyles::default(),
+            reader_styles: ReaderStyles::default(),
             current_page: 0,
             page_count,
         }
@@ -187,9 +205,14 @@ fn main() {
                 rcode(200)
             }
             (Method::Post, "/api/invert-text-color") => {
-                let bg = state.content_styles.bg_color;
+                let cbg = state.content_styles.bg_color;
                 state.content_styles.bg_color = state.content_styles.fg_color;
-                state.content_styles.fg_color = bg;
+                state.content_styles.fg_color = cbg;
+                let rbg = state.reader_styles.bg_color;
+                state.reader_styles.bg_color = state.reader_styles.fg_color;
+                state.reader_styles.fg_color = rbg;
+                debug!("Inverted content styles: {:?}", state.content_styles);
+                info!("Inverted text color");
                 rcode(200)
             }
             (&Method::Get, "/") => {
@@ -262,9 +285,11 @@ fn main() {
                     };
                     let page_url = std::path::PathBuf::from("/content").join(page_path);
                     let page_url = page_url.to_str().unwrap();
+                    
+                    let stylesheet = state.reader_styles.render().unwrap();
                     let rv = Reader {
                         title: &book_title,
-                        stylesheet: STYLES_CSS,
+                        stylesheet: &stylesheet,
                         reader_js: READER_JS,
                         page_url,
 

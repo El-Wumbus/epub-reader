@@ -26,8 +26,8 @@
 
 /** Dynamic variables */
 
---background-color: var(--color-surface-a0);
---foreground-color: var(--color-primary-a50);
+--background-color: {{ bg_color }};
+--foreground-color: {{ fg_color }};
 
 --infobar-font-size: 18px;
 --infobar-font-family: Iosevka, sans-serif;

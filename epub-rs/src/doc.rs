@@ -10,7 +10,6 @@ use std::io::BufReader;
 use std::io::{Read, Seek};
 use std::path::{Component, Path, PathBuf};
 use xmlutils::XMLError;
-use serde::Serialize;
 
 
 use crate::archive::EpubArchive;
@@ -30,7 +29,7 @@ pub enum DocError {
 }
 
 /// Struct that represent a navigation point in a table of content
-#[derive(Clone, Debug, Eq, Serialize)]
+#[derive(Clone, Debug, Eq)]
 pub struct NavPoint {
     /// the title of this navpoint
     pub label: String,
@@ -60,7 +59,7 @@ impl PartialEq for NavPoint {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct SpineItem {
     pub idref: String,
     pub id: Option<String>,
