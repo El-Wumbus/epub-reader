@@ -83,7 +83,7 @@ impl<R: std::io::Read + std::io::Seek> BookState<R> {
 
 fn main() {
     let mut builder = env_logger::Builder::new();
-    builder.filter_level(log::LevelFilter::Info).init();
+    builder.filter_level(log::LevelFilter::Debug).init();
 
     let args = std::env::args();
     let book = args
@@ -222,7 +222,9 @@ fn main() {
                         .render()
                         .expect("be a good template pls");
                     debug!("rendered content styles: {content_styles}");
-                    inject_styles(&data, &content_styles)
+                    let data = std::str::from_utf8(&data).unwrap();
+                    inject_styles2(&data, &content_styles).into_bytes()
+                    //inject_styles(&data, &content_styles)
                 } else {
                     data
                 };
@@ -292,39 +294,36 @@ fn main() {
     }
 }
 
-fn inject_styles(src: &[u8], css: &str) -> Vec<u8> {
-    use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
-    use quick_xml::{Reader, Writer};
-    let src = std::str::from_utf8(src).expect("please use UTF8");
-    let mut reader = Reader::from_str(src);
-    let mut writer = Writer::new(Cursor::new(Vec::new()));
-    loop {
-        match reader.read_event() {
-            Ok(Event::End(e)) if e.name().as_ref() == b"head" => {
-                let mut elem = BytesStart::new("style");
-                elem.push_attribute(("type", mime::CSS));
-                writer.write_event(Event::Start(elem)).expect("bruh");
-
-                let css = BytesText::new(css);
-                writer.write_event(Event::Text(css)).expect("please");
-
-                writer
-                    .write_event(Event::End(BytesEnd::new("style")))
-                    .expect("<3");
-
-                writer.write_event(Event::End(e)).expect("is okay");
+fn inject_styles2(src: &str, stylesheet: &str) -> String {
+    use xmlparser::{ElementEnd, Token};
+    let mut output = String::with_capacity(src.len() + stylesheet.len());
+    for token in xmlparser::Tokenizer::from(src) {
+        match token {
+            Ok(Token::Attribute { span, .. }) => {
+                output.push(' ');
+                output.push_str(span.as_str());
             }
-            Ok(Event::Eof) => break,
-            Ok(e) => assert!(writer.write_event(e.borrow()).is_ok()),
-            Err(e) => panic!(
-                "XML parse error at position {}: {:?}",
-                reader.error_position(),
-                e
-            ),
+            Ok(Token::ElementEnd {
+                end: ElementEnd::Close(_, ename),
+                span,
+                ..
+            }) if ename.as_str() == "head" => {
+                output.push_str(r#"<style type="text/css">"#);
+                output.push('\n');
+                output.push_str(stylesheet);
+                output.push('\n');
+                output.push_str("</style>");
+                output.push('\n');
+
+                output.push_str(span.as_str());
+            }
+            Ok(t) => {
+                output.push_str(t.span().as_str());
+            }
+            Err(e) => panic!("XML parse error: {e}"),
         }
     }
-
-    writer.into_inner().into_inner()
+    output
 }
 
 fn rcode(status: u16) -> Response<Cursor<Vec<u8>>> {
