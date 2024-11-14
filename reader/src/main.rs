@@ -1,13 +1,15 @@
 use epub::doc::EpubDoc;
 use log::{debug, error, info};
 use rinja::Template;
-use serde::{Deserialize, Serialize};
-use std::io::{Cursor, Read, Write as _};
-use std::path::PathBuf;
+use std::io::{Cursor, Read};
 use tiny_http::{Header, Method, Request, Response, StatusCode};
-use util::*;
-mod util;
-
+use slime::parser::{ini, UnParser as _};
+//use util::*;
+//mod util;
+pub const XHTML: &str = "application/xhtml+xml";
+    pub const HTML: &str = "text/html";
+    pub const JSON: &str = "application/json";
+    pub const CSS: &str = "text/css";
 const READER_JS: &str = include_str!("reader.js");
 
 #[derive(Debug, Template)]
@@ -21,7 +23,7 @@ struct Reader<'a> {
     page_count: usize,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 struct CSSVariables<'a> {
     fg_color: &'a str,
     bg_color: &'a str,
@@ -38,6 +40,38 @@ impl<'a> Default for CSSVariables<'a> {
             content_width_em: 36.0,
         }
     }
+}
+
+// parse from an INI file
+impl<'a> TryFrom<ini::Parse<'a>> for CSSVariables<'a> {
+    type Error = &'static str;
+
+    fn try_from(ini: ini::Parse<'a>) -> Result<CSSVariables<'a>, Self::Error> {
+        let mut vars = Self::default();
+        for ini::Pair { key, value, .. } in ini.filter(|x|x.section == "css") {
+            match key {
+                "fg_color" => vars.fg_color = value,
+                "bg_color" => vars.bg_color = value,
+                "content_font_size_px" => vars.content_font_size_px = value.parse().map_err(|_| "Invalid content_font_size_px")?,
+                "content_width_em" => vars.content_width_em = value.parse().map_err(|_| "Invalid content_width_em")?,
+                _ => {},
+            }
+        }
+
+        Ok(vars)
+    }
+}
+
+impl<'a> From<CSSVariables<'a>> for [ini::Pair<'a>;4] {
+    fn from(vars: CSSVariables<'a>) -> Self {
+        [
+            ini::Pair { section: "css", key: "fg_color", value: vars.fg_color},
+            ini::Pair { section: "css", key: "bg_color", value: vars.bg_color},
+            ini::Pair { section: "css", key: "content_font_size_px", value: Box::leak(Box::new(vars.content_font_size_px.to_string()))},
+            ini::Pair { section: "css", key: "content_width_em", value: Box::leak(Box::new(vars.content_width_em.to_string()))},
+        ]
+    }
+
 }
 
 #[derive(Debug, Clone, Default, Template)]
@@ -93,44 +127,35 @@ impl<'a, R: std::io::Read + std::io::Seek> BookState<'a, R> {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Default)]
 struct Config<'a> {
-    #[serde(borrow)]
     css_variables: CSSVariables<'a>,
 }
 
 fn main() {
     let mut builder = env_logger::Builder::new();
     builder.filter_level(log::LevelFilter::Debug).init();
-
-    let config_home = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").expect("home env"))
-                .join(".config")
-        });
-    let config_file = config_home.join("epub-reader").join("config.ron");
+    
+    let config_home = slime::xdg::Dirs::config_home_dir().expect("home dir");
+    let config_file = config_home.join("epub-reader").join("config.ini");
 
     debug!("Using \"{}\" as config file", config_file.display());
     let config = if !config_file.exists() {
         let config = Config::default();
-        let config_s =
-            ron::ser::to_string_pretty(&config, ron::ser::PrettyConfig::new())
-                .unwrap();
         if let Some(parent) = config_file.parent() {
             if !parent.exists() {
                 std::fs::create_dir_all(parent).expect("create parent dir");
             }
         }
         let mut config_f = std::fs::File::create(&config_file).unwrap();
-        config_f.write_all(config_s.as_bytes()).unwrap();
+        let ting: [ini::Pair;4] = config.css_variables.into();
+        ting.into_iter().serialize(&mut config_f).expect("good time writing to file");
         config
     } else {
         let config_s = std::fs::read_to_string(&config_file).unwrap();
-        let config_bs = Box::leak(Box::new(config_s));
-        let config = ron::de::from_str(config_bs).expect("proper config file");
-        config
+        let config_s = Box::leak(Box::new(config_s));
+        let i = ini::Parse::from(config_s.as_str());
+        Config { css_variables: i.try_into().expect("valid config") }
     };
 
     let args = std::env::args();
@@ -312,7 +337,7 @@ fn main() {
                     continue;
                 };
 
-                let data = if mime == mime::XHTML || mime == mime::HTML {
+                let data = if mime == XHTML || mime == HTML {
                     let content_styles = ContentStyles {
                         variables: state.css_variables,
                     }
@@ -381,7 +406,7 @@ fn main() {
                         rv.render().expect("thing inside thing"),
                     )
                     .with_header(
-                        Header::from_bytes(b"Content-Type", mime::XHTML)
+                        Header::from_bytes(b"Content-Type", XHTML)
                             .unwrap(),
                     )
                 } else {

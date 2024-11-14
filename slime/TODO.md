@@ -1,1 +1,4 @@
-* Add xdg defaults enumeration
+- MIME types 
+- MIME type enumeration
+- Simple PRNG
+- XDG defaults enumeration
