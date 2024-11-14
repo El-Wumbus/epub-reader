@@ -1,14 +1,18 @@
 use std::path::PathBuf;
 
+/// TODO: reconsider the fields of this structure
 pub struct Dirs {
     pub home: Option<PathBuf>,
     pub cache: Option<PathBuf>,
-    pub config: Option<PathBuf>,
-    pub data: Option<PathBuf>,
+    pub config_home: Option<PathBuf>,
+    pub config_dirs: Vec<PathBuf>,
+    pub data_home: Option<PathBuf>,
+    pub data_dirs: Vec<PathBuf>,
     pub runtime: Option<PathBuf>,
     pub state: Option<PathBuf>,
     pub executable: Option<PathBuf>,
     pub user_directories: Vec<UserDir>,
+    pub current_desktop: Vec<String>,
 }
 
 impl Dirs {
@@ -16,8 +20,10 @@ impl Dirs {
         Self {
             home: Self::home_dir(),
             cache: Self::cache_dir(),
-            config: Self::config_dir(),
-            data: Self::data_dir(),
+            config_home: Self::config_home_dir(),
+            config_dirs: Self::config_dirs(),
+            data_home: Self::data_home_dir(),
+            data_dirs: Self::data_dirs(),
             runtime: Self::runtime_dir(),
             state: Self::state_dir(),
             executable: Self::executable_dir(),
@@ -25,8 +31,61 @@ impl Dirs {
                 .into_iter()
                 .flatten()
                 .collect(),
+            current_desktop: Self::current_desktop(),
         }
     }
+
+    /// Returns the paths where `mimeapps.list` files are found in accordance with the lookup order.
+    ///
+    /// The lookup order follows:
+    /// - `$XDG_CONFIG_HOME/$desktop-mimeapps.list`
+    /// - `$XDG_CONFIG_HOME/mimeapps.list`
+    /// - `$XDG_CONFIG_DIRS/$desktop-mimeapps.list`
+    /// - `$XDG_CONFIG_DIRS/mimeapps.list`
+    /// - `$XDG_DATA_HOME/applications/$desktop-mimeapps.list`
+    /// - `$XDG_DATA_HOME/applications/mimeapps.list`
+    /// - `$XDG_DATA_DIRS/applications/$desktop-mimeapp`
+    /// - `$XDG_DATA_DIRS/applications/mimeapps.list`
+    ///
+    /// Written in accordance with the specification found at
+    /// <https://specifications.freedesktop.org/mime-apps-spec/latest/file.html>.
+    pub fn mimeapps_search_paths(&self) -> Vec<PathBuf> {
+        let mut search_paths = vec![];
+
+        if let Some(dir) = self.config_home.as_deref() {
+            for desktop in self.current_desktop.iter() {
+                search_paths
+                    .push(dir.join(format!("{}-mimeapps.list", desktop)));
+            }
+            search_paths.push(dir.join("mimeapps.list"));
+        }
+        for dir in self.config_dirs.iter() {
+            for desktop in self.current_desktop.iter() {
+                search_paths.push(dir.join(format!("{desktop}-mimeapps.list")));
+            }
+            search_paths.push(dir.join("mimeapps.list"));
+        }
+
+        if let Some(dir) = self.data_home.as_deref() {
+            for desktop in self.current_desktop.iter() {
+                search_paths.push(
+                    dir.join(format!("applications/{desktop}-mimeapps.list")),
+                );
+            }
+            search_paths.push(dir.join("applications/mimeapps.list"));
+        }
+        for dir in self.data_dirs.iter() {
+            for desktop in self.current_desktop.iter() {
+                search_paths.push(
+                    dir.join(format!("applications/{desktop}-mimeapps.list")),
+                );
+            }
+            search_paths.push(dir.join("applications/mimeapps.list"));
+        }
+
+        search_paths
+    }
+
     pub fn home_dir() -> Option<PathBuf> {
         std::env::var_os("HOME")
             .and_then(|h| if h.is_empty() { None } else { Some(h) })
@@ -39,35 +98,42 @@ impl Dirs {
             .and_then(is_absolute)
             .or_else(|| Self::home_dir().map(|h| h.join(".cache")))
     }
-    pub fn config_dir() -> Option<PathBuf> {
+
+    /// This is probably what you want.
+    pub fn config_home_dir() -> Option<PathBuf> {
         std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .and_then(is_absolute)
             .or_else(|| Self::home_dir().map(|h| h.join(".config")))
     }
-    pub fn data_dir() -> Option<PathBuf> {
+
+    pub fn data_home_dir() -> Option<PathBuf> {
         std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
             .and_then(is_absolute)
             .or_else(|| Self::home_dir().map(|h| h.join(".local/share")))
     }
+
     pub fn data_dirs() -> Vec<PathBuf> {
         let Ok(d) = std::env::var("XDG_DATA_DIRS") else {
             return vec![];
         };
         d.split(':').map(str::trim).map(PathBuf::from).collect()
     }
+
     pub fn runtime_dir() -> Option<PathBuf> {
         std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
             .and_then(is_absolute)
     }
+
     pub fn state_dir() -> Option<PathBuf> {
         std::env::var_os("XDG_STATE_HOME")
             .map(PathBuf::from)
             .and_then(is_absolute)
             .or_else(|| Self::home_dir().map(|h| h.join(".local/state")))
     }
+
     pub fn executable_dir() -> Option<PathBuf> {
         std::env::var_os("XDG_BIN_HOME")
             .map(PathBuf::from)
@@ -77,12 +143,37 @@ impl Dirs {
 
     pub fn user_directories() -> Option<Vec<UserDir>> {
         let home = Self::home_dir()?;
-        let config = Self::config_dir()?;
+
+        let config = Self::config_home_dir()?;
         let users_file = config.join("user-dirs.dirs");
         let users = std::fs::read_to_string(users_file).ok()?;
         let parsed = UserDirParser::new(users.as_str(), home.as_path())
             .collect::<Vec<_>>();
         Some(parsed)
+    }
+
+    pub fn current_desktop() -> Vec<String> {
+        let Some(desktop) = std::env::var("XDG_CURRENT_DESKTOP").ok() else {
+            return vec![];
+        };
+        desktop
+            .split(':')
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+            .map(String::from)
+            .collect()
+    }
+
+    pub fn config_dirs() -> Vec<PathBuf> {
+        let Some(desktop) = std::env::var("XDG_CONFIG_DIRS").ok() else {
+            return vec![];
+        };
+        desktop
+            .split(':')
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+            .map(PathBuf::from)
+            .collect()
     }
 }
 
@@ -92,12 +183,14 @@ pub struct UserDirParser<'a> {
     /// The user's home directory. This is used for completing relative paths in the document.
     home: &'a std::path::Path,
 }
+
 #[derive(Debug)]
 pub struct UserDir {
     /// Name like "desktop" from `XDG_DESKTOP_DIR`.
     pub name: String,
     pub path: PathBuf,
 }
+
 impl<'a> UserDirParser<'a> {
     pub fn new(s: &'a str, home: &'a std::path::Path) -> UserDirParser<'a> {
         Self {
@@ -155,15 +248,6 @@ impl<'a> Iterator for UserDirParser<'a> {
     }
 }
 
-pub fn current_desktop() -> Option<String> {
-    std::env::var("XDG_CURRENT_DESKTOP").ok()
-}
-
-/// TODO: this is a stub.
-pub fn query_default(mime: impl AsRef<str>) -> std::io::Result<()> {
-    todo!()
-}
-
 fn shell_unescape(s: &str) -> String {
     let mut new = String::new();
     let mut chars = s.chars();
@@ -193,7 +277,7 @@ mod tests {
     use super::*;
     #[test]
     fn user_paser() {
-        let config_home = Dirs::config_dir().unwrap();
+        let config_home = Dirs::config_home_dir().unwrap();
         let home = Dirs::home_dir().unwrap();
         let users_file = config_home.join("user-dirs.dirs");
         let users = std::fs::read_to_string(users_file).unwrap();
@@ -203,5 +287,19 @@ mod tests {
             println!("{x:?}");
         }
         assert!(parsed.into_iter().find(|x| x.name == "documents").is_some());
+    }
+
+    #[test]
+    fn test_finding_mimepaths_search_paths() {
+        let mut found_one = false;
+        for path in Dirs::all().mimeapps_search_paths() {
+            if path.is_file() {
+                println!("'{}' Found!", path.display());
+                found_one = true;
+            } else {
+                println!("'{}' Not Found!", path.display());
+            }
+        }
+        assert!(found_one, "Expected to find at least one mimeapps file");
     }
 }
