@@ -51,7 +51,9 @@ impl<'a> XMLReader<'a> {
         //If there is a UTF-8 BOM marker, ignore it
         let content_slice = if content[0..3] == [0xefu8, 0xbbu8, 0xbfu8] {
             &content[3..]
-        } else if content[0..2] == [0xfeu8, 0xffu8] || content[0..2] == [0xffu8, 0xfeu8] {
+        } else if content[0..2] == [0xfeu8, 0xffu8]
+            || content[0..2] == [0xffu8, 0xfeu8]
+        {
             //handle utf-16
             let (big_byte, small_byte) = if content[0] == 0xfeu8 {
                 (1, 0) //big endian utf-16
@@ -182,9 +184,10 @@ impl XMLNode {
 
 impl fmt::Display for XMLNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let childs: String = self.children.iter().fold(String::new(), |sum, x| {
-            format!("{}{}\n\t", sum, *x.borrow())
-        });
+        let childs: String =
+            self.children.iter().fold(String::new(), |sum, x| {
+                format!("{}{}\n\t", sum, *x.borrow())
+            });
         let attrs: String = self
             .attrs
             .iter()
@@ -210,8 +213,7 @@ pub fn replace_attrs<F>(
     extra_css: &[String],
 ) -> Result<Vec<u8>, XMLError>
 where
-    F: Fn(&str, &str, &str) -> String,
-{
+    F: Fn(&str, &str, &str) -> String, {
     let mut b = Vec::new();
 
     {
@@ -237,7 +239,11 @@ where
                     {
                         for i in 0..attributes.len() {
                             let mut attr = attributes[i].to_owned();
-                            let repl = closure(name.local_name, &attr.name.local_name, &attr.value);
+                            let repl = closure(
+                                name.local_name,
+                                &attr.name.local_name,
+                                &attr.value,
+                            );
                             attr.value = repl;
                             attrs.push(attr);
                         }
@@ -245,7 +251,10 @@ where
                         let w = WriterEvent::StartElement {
                             name,
                             attributes: Cow::Owned(
-                                attrs.iter().map(OwnedAttribute::borrow).collect(),
+                                attrs
+                                    .iter()
+                                    .map(OwnedAttribute::borrow)
+                                    .collect(),
                             ),
                             //attributes: attributes,
                             namespace,
@@ -254,7 +263,9 @@ where
                     }
                 }
                 ReaderEvent::EndElement { name: n } => {
-                    if n.local_name.to_lowercase() == "head" && !extra_css.is_empty() {
+                    if n.local_name.to_lowercase() == "head"
+                        && !extra_css.is_empty()
+                    {
                         // injecting here the extra css
                         let mut allcss = extra_css.concat();
                         allcss = format!("*/ {} /*", allcss);

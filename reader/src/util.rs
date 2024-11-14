@@ -21,8 +21,7 @@ macro_rules! pred_cmp {
 
 pub trait StringUtil
 where
-    Self: AsRef<str>,
-{
+    Self: AsRef<str>, {
     fn concat(&self, other: &Self) -> String {
         let mut new = String::from(self.as_ref());
         new.push_str(other.as_ref());
@@ -93,7 +92,8 @@ where
                     costs[j + 1] = corner;
                 } else {
                     let t = if upper < corner { upper } else { corner };
-                    costs[j + 1] = (if costs[j] < t { costs[j] } else { t }) + 1;
+                    costs[j + 1] =
+                        (if costs[j] < t { costs[j] } else { t }) + 1;
                 }
                 corner = upper;
             }
@@ -107,8 +107,7 @@ impl<S> StringUtil for S where S: AsRef<str> {}
 
 pub trait ShitStringUtil
 where
-    Self: AsRef<OsStr>,
-{
+    Self: AsRef<OsStr>, {
     fn concat(&self, strs: &[&dyn AsRef<OsStr>]) -> OsString {
         let base = self.as_ref();
         let strs = strs.iter().map(|x| x.as_ref());
@@ -127,11 +126,12 @@ impl<S: AsRef<OsStr>> ShitStringUtil for S {}
 
 pub trait PathUtil
 where
-    Self: AsRef<Path>,
-{
+    Self: AsRef<Path>, {
     fn walk(
         &self,
-        callback: &mut dyn FnMut(&std::path::Path) -> Result<(), std::io::Error>,
+        callback: &mut dyn FnMut(
+            &std::path::Path,
+        ) -> Result<(), std::io::Error>,
     ) -> Result<(), std::io::Error> {
         let dir = self.as_ref();
         if dir.is_dir() {
@@ -447,7 +447,8 @@ pub mod path {
 
         /// True if the path begins with //, but not ///.
         pub fn has_app_defined(&self) -> bool {
-            self.path.starts_with("//") && (self.path.len() == 2 || &self.path[2..3] != "/")
+            self.path.starts_with("//")
+                && (self.path.len() == 2 || &self.path[2..3] != "/")
         }
 
         /// True if the path is absolute.
@@ -473,7 +474,8 @@ pub mod path {
             } else {
                 self.path.len()
             };
-            let components: Vec<_> = self.path[start..limit].split('/').collect();
+            let components: Vec<_> =
+                self.path[start..limit].split('/').collect();
             let mut parent_allowed = start == 0;
             for component in components {
                 if parent_allowed {
@@ -493,8 +495,7 @@ pub mod path {
         pub fn join<'b, 'c>(&self, with: impl Into<Path<'b>>) -> Path<'c>
         where
             'a: 'c,
-            'b: 'c,
-        {
+            'b: 'c, {
             let with = with.into();
             if with.is_abs() {
                 with.clone()
@@ -505,7 +506,10 @@ pub mod path {
 
         /// Strip a prefix from the path.  The prefix and path are allowed to be non-normal and will
         /// have "." components dropped from consideration.
-        pub fn strip_prefix<'b>(&self, prefix: impl Into<Path<'b>>) -> Option<Path> {
+        pub fn strip_prefix<'b>(
+            &self,
+            prefix: impl Into<Path<'b>>,
+        ) -> Option<Path> {
             let prefix = prefix.into();
             // NOTE(rescrv):  You might be tempted to use components() and zip() to solve and/or
             // simplify this.  That fails for one reason:  "components()" intentionally rewrites `foo/`
@@ -586,7 +590,9 @@ pub mod path {
                 } else if &self.path[slash + 1..limit] == "." {
                     components.push(Component::CurDir);
                 } else {
-                    components.push(Component::Normal(Path::new(&self.path[slash + 1..limit])));
+                    components.push(Component::Normal(Path::new(
+                        &self.path[slash + 1..limit],
+                    )));
                 }
                 if slash == 0 {
                     components.push(Component::RootDir);
@@ -610,7 +616,9 @@ pub mod path {
                 } else if &self.path[..limit] == "." {
                     components.push(Component::CurDir);
                 } else {
-                    components.push(Component::Normal(Path::new(&self.path[..limit])));
+                    components.push(Component::Normal(Path::new(
+                        &self.path[..limit],
+                    )));
                 }
             }
             components.reverse();
@@ -644,13 +652,19 @@ pub mod path {
     }
 
     impl<'a> std::fmt::Debug for Path<'a> {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        fn fmt(
+            &self,
+            f: &mut std::fmt::Formatter<'_>,
+        ) -> std::result::Result<(), std::fmt::Error> {
             write!(f, "{:?}", self.path)
         }
     }
 
     impl<'a> std::fmt::Display for Path<'a> {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        fn fmt(
+            &self,
+            f: &mut std::fmt::Formatter<'_>,
+        ) -> std::result::Result<(), std::fmt::Error> {
             write!(f, "{}", self.path)
         }
     }

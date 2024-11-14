@@ -483,6 +483,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "slime"
+version = "0.1.0"
+
+[[package]]
 name = "syn"
 version = "2.0.87"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -641,10 +645,6 @@ checksum = "36c1fec1a2bb5866f07c25f68c26e565c4c200aebb96d7e55710c19d3e8ac49b"
 dependencies = [
  "memchr",
 ]
-
-[[package]]
-name = "xdg-utils"
-version = "0.4.0"
 
 [[package]]
 name = "xml-rs"

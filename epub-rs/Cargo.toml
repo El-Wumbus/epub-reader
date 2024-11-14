@@ -1,8 +1,9 @@
+cargo-features = ["edition2024"]
 [package]
 license = "Unlicense"
 name = "epub"
 version = "2.1.2"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 xml-rs = "0.8.20"

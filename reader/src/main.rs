@@ -1,11 +1,11 @@
 use epub::doc::EpubDoc;
 use log::{debug, error, info};
 use rinja::Template;
+use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read, Write as _};
+use std::path::PathBuf;
 use tiny_http::{Header, Method, Request, Response, StatusCode};
 use util::*;
-use std::path::PathBuf;
-use serde::{Serialize, Deserialize};
 mod util;
 
 const READER_JS: &str = include_str!("reader.js");
@@ -74,7 +74,8 @@ impl<'a, R: std::io::Read + std::io::Seek> BookState<'a, R> {
         &mut self,
         pred: impl Fn(usize, usize) -> usize,
     ) -> Result<Response<Cursor<Vec<u8>>>, ()> {
-        self.current_page = pred(self.current_page, self.page_count).clamp(0, self.page_count - 1);
+        self.current_page = pred(self.current_page, self.page_count)
+            .clamp(0, self.page_count - 1);
 
         assert!(
             self.book.set_current_page(self.current_page),
@@ -92,8 +93,7 @@ impl<'a, R: std::io::Read + std::io::Seek> BookState<'a, R> {
     }
 }
 
-
-#[derive(Debug, Clone, Default,Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 struct Config<'a> {
     #[serde(borrow)]
@@ -103,16 +103,21 @@ struct Config<'a> {
 fn main() {
     let mut builder = env_logger::Builder::new();
     builder.filter_level(log::LevelFilter::Debug).init();
-    
-    let config_home = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| {
-        PathBuf::from(std::env::var_os("HOME").expect("home env")).join(".config")
-    });
+
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("HOME").expect("home env"))
+                .join(".config")
+        });
     let config_file = config_home.join("epub-reader").join("config.ron");
 
     debug!("Using \"{}\" as config file", config_file.display());
     let config = if !config_file.exists() {
         let config = Config::default();
-        let config_s = ron::ser::to_string_pretty(&config, ron::ser::PrettyConfig::new()).unwrap();
+        let config_s =
+            ron::ser::to_string_pretty(&config, ron::ser::PrettyConfig::new())
+                .unwrap();
         if let Some(parent) = config_file.parent() {
             if !parent.exists() {
                 std::fs::create_dir_all(parent).expect("create parent dir");
@@ -137,7 +142,8 @@ fn main() {
     let mut book = std::fs::File::open(book).expect("File to open properly");
     let mut book_buffer = Vec::new();
     book.read_to_end(&mut book_buffer).expect("readable file");
-    let book = EpubDoc::from_reader(Cursor::new(book_buffer)).expect("valid epub archive");
+    let book = EpubDoc::from_reader(Cursor::new(book_buffer))
+        .expect("valid epub archive");
     debug!(
         "Metadata: {:#?}\nSpine: {:#?}\nResources = {:#?}\n",
         book.metadata, book.spine, book.resources
@@ -191,7 +197,9 @@ fn main() {
                         Err(_) => rcode(500),
                     },
                     "-" => {
-                        match state.change_page(|page, _| if page != 0 { page - 1 } else { page }) {
+                        match state.change_page(|page, _| {
+                            if page != 0 { page - 1 } else { page }
+                        }) {
                             Ok(r) => r,
                             Err(_) => rcode(500),
                         }
@@ -201,7 +209,8 @@ fn main() {
                             respond(request, rcode(400));
                             continue;
                         };
-                        let Ok(r) = state.change_page(|_, _| page.max(1) - 1) else {
+                        let Ok(r) = state.change_page(|_, _| page.max(1) - 1)
+                        else {
                             respond(request, rcode(500));
                             continue;
                         };
@@ -281,8 +290,11 @@ fn main() {
                 Response::from_data(&[])
                     .with_status_code(StatusCode(307))
                     .with_header(
-                        Header::from_bytes(b"location", page_url.as_os_str().as_encoded_bytes())
-                            .unwrap(),
+                        Header::from_bytes(
+                            b"location",
+                            page_url.as_os_str().as_encoded_bytes(),
+                        )
+                        .unwrap(),
                     )
             }
             (&Method::Get, content) if content.starts_with("/content/") => {
@@ -292,7 +304,10 @@ fn main() {
                     state.book.get_resource_mime_by_path(&content),
                 ) else {
                     request
-                        .respond(Response::from_string("404").with_status_code(StatusCode(404)))
+                        .respond(
+                            Response::from_string("404")
+                                .with_status_code(StatusCode(404)),
+                        )
                         .unwrap();
                     continue;
                 };
@@ -310,11 +325,13 @@ fn main() {
                     data
                 };
                 Response::from_data(data).with_header(
-                    Header::from_bytes(b"Content-Type", mime.as_bytes()).expect("no header?"),
+                    Header::from_bytes(b"Content-Type", mime.as_bytes())
+                        .expect("no header?"),
                 )
             }
             (&Method::Get, req_url) => {
-                let req_url = std::path::PathBuf::from(req_url.trim_start_matches('/'));
+                let req_url =
+                    std::path::PathBuf::from(req_url.trim_start_matches('/'));
                 let abs_url = if req_url.starts_with(&state.book.root_base) {
                     req_url
                 } else {
@@ -323,7 +340,8 @@ fn main() {
 
                 println!("{request_url} :: looking for {}", abs_url.display());
 
-                if let Some(idx) = state.book.resource_uri_to_chapter(&abs_url) {
+                if let Some(idx) = state.book.resource_uri_to_chapter(&abs_url)
+                {
                     if idx != state.current_page {
                         state.current_page = idx;
                         info!(
@@ -341,7 +359,8 @@ fn main() {
                         respond(request, rcode(500));
                         continue;
                     };
-                    let page_url = std::path::PathBuf::from("/content").join(page_path);
+                    let page_url =
+                        std::path::PathBuf::from("/content").join(page_path);
                     let page_url = page_url.to_str().unwrap();
 
                     let stylesheet = ReaderStyles {
@@ -358,8 +377,13 @@ fn main() {
                         current_page: state.current_page + 1,
                         page_count: state.page_count,
                     };
-                    Response::from_string(rv.render().expect("thing inside thing"))
-                        .with_header(Header::from_bytes(b"Content-Type", mime::XHTML).unwrap())
+                    Response::from_string(
+                        rv.render().expect("thing inside thing"),
+                    )
+                    .with_header(
+                        Header::from_bytes(b"Content-Type", mime::XHTML)
+                            .unwrap(),
+                    )
                 } else {
                     let (Some(data), Some(mime)) = (
                         state.book.get_resource_by_path(&abs_url),
@@ -370,7 +394,8 @@ fn main() {
                     };
 
                     Response::from_data(data).with_header(
-                        Header::from_bytes(b"Content-Type", mime.as_bytes()).expect("no header?"),
+                        Header::from_bytes(b"Content-Type", mime.as_bytes())
+                            .expect("no header?"),
                     )
                 }
             }
@@ -414,7 +439,8 @@ fn inject_styles(src: &str, stylesheet: &str) -> String {
 }
 
 fn rcode(status: u16) -> Response<Cursor<Vec<u8>>> {
-    Response::from_string(status.to_string()).with_status_code(StatusCode(status))
+    Response::from_string(status.to_string())
+        .with_status_code(StatusCode(status))
 }
 
 fn respond<R: std::io::Read>(request: Request, response: Response<R>) {

@@ -11,7 +11,6 @@ use std::io::{Read, Seek};
 use std::path::{Component, Path, PathBuf};
 use xmlutils::XMLError;
 
-
 use crate::archive::EpubArchive;
 
 use crate::xmlutils;
@@ -251,9 +250,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// Returns [`None`] if the cover can't be found.
     pub fn get_cover(&mut self) -> Option<(Vec<u8>, String)> {
         let cover_id = self.get_cover_id();
-        cover_id.and_then(|cid| {
-            self.get_resource(&cid)
-        })
+        cover_id.and_then(|cid| self.get_resource(&cid))
     }
 
     /// Returns Release Identifier defined at
@@ -274,7 +271,10 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// Returns the resource content by full path in the epub archive
     ///
     /// Returns [`None`] if the path doesn't exist in the epub
-    pub fn get_resource_by_path<P: AsRef<Path>>(&mut self, path: P) -> Option<Vec<u8>> {
+    pub fn get_resource_by_path<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+    ) -> Option<Vec<u8>> {
         self.archive.get_entry(path).ok()
     }
 
@@ -292,7 +292,10 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// Returns the resource content by full path in the epub archive, as String
     ///
     /// Returns [`None`] if the path doesn't exists in the epub
-    pub fn get_resource_str_by_path<P: AsRef<Path>>(&mut self, path: P) -> Option<String> {
+    pub fn get_resource_str_by_path<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+    ) -> Option<String> {
         self.archive.get_entry_as_str(path).ok()
     }
 
@@ -337,7 +340,10 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// ```
     ///
     /// Returns [`None`] the resource can't be found.
-    pub fn get_resource_mime_by_path<P: AsRef<Path>>(&self, path: P) -> Option<String> {
+    pub fn get_resource_mime_by_path<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> Option<String> {
         let path = path.as_ref();
 
         self.resources.iter().find_map(|(_, r)| {
@@ -395,14 +401,16 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// Returns [`DocError::InvalidEpub`] if the epub is broken.
     pub fn get_current_with_epub_uris(&mut self) -> Result<Vec<u8>, DocError> {
         let path = self.get_current_path().ok_or(DocError::InvalidEpub)?;
-        let (current, _mime) = self.get_current().ok_or(DocError::InvalidEpub)?;
+        let (current, _mime) =
+            self.get_current().ok_or(DocError::InvalidEpub)?;
 
         let resp = xmlutils::replace_attrs(
             current.as_slice(),
             |element, attr, value| match (element, attr) {
-                ("link", "href") | ("image", "href") | ("a", "href") | ("img", "src") => {
-                    build_epub_uri(&path, value)
-                }
+                ("link", "href")
+                | ("image", "href")
+                | ("a", "href")
+                | ("img", "src") => build_epub_uri(&path, value),
                 _ => String::from(value),
             },
             &self.extra_css,
@@ -620,7 +628,9 @@ impl<R: Read + Seek> EpubDoc<R> {
         for r in &manifest.borrow().children {
             let item = r.borrow();
             if self.cover_id.is_none() {
-                if let (Some(id), Some(property)) = (item.get_attr("id"), item.get_attr("properties")) {
+                if let (Some(id), Some(property)) =
+                    (item.get_attr("id"), item.get_attr("properties"))
+                {
                     if property == "cover-image" {
                         self.cover_id = Some(id);
                     }
@@ -649,7 +659,9 @@ impl<R: Read + Seek> EpubDoc<R> {
         for r in &metadata.borrow().children {
             let item = r.borrow();
             if item.name.local_name == "meta" {
-                if let (Some(k), Some(v)) = (item.get_attr("name"), item.get_attr("content")) {
+                if let (Some(k), Some(v)) =
+                    (item.get_attr("name"), item.get_attr("content"))
+                {
                     if k == "cover" {
                         self.cover_id = Some(v.clone());
                     }
@@ -696,7 +708,10 @@ impl<R: Read + Seek> EpubDoc<R> {
         path
     }
 
-    fn insert_resource(&mut self, item: &xmlutils::XMLNode) -> Result<(), XMLError> {
+    fn insert_resource(
+        &mut self,
+        item: &xmlutils::XMLNode,
+    ) -> Result<(), XMLError> {
         let id = item
             .get_attr("id")
             .ok_or_else(|| XMLError::AttrNotFound("id".into()))?;
@@ -712,14 +727,22 @@ impl<R: Read + Seek> EpubDoc<R> {
         Ok(())
     }
 
-    fn insert_spine(&mut self, item: &xmlutils::XMLNode) -> Result<(), DocError> {
+    fn insert_spine(
+        &mut self,
+        item: &xmlutils::XMLNode,
+    ) -> Result<(), DocError> {
         let idref = item
             .get_attr("idref")
             .ok_or_else(|| XMLError::AttrNotFound("idref".into()))?;
         let linear = item.get_attr("linear").unwrap_or("yes".into()) == "yes";
         let properties = item.get_attr("properties");
         let id = item.get_attr("id");
-        self.spine.push(SpineItem { idref, id, linear, properties });
+        self.spine.push(SpineItem {
+            idref,
+            id,
+            linear,
+            properties,
+        });
         Ok(())
     }
 
@@ -752,10 +775,11 @@ impl<R: Read + Seek> EpubDoc<R> {
             if item.name.local_name != "navPoint" {
                 continue;
             }
-            let play_order = item.get_attr("playOrder").and_then(|n| n.parse().ok());
-            let content = item
-                .find("content")
-                .and_then(|c| c.borrow().get_attr("src").map(|p| self.root_base.join(p)));
+            let play_order =
+                item.get_attr("playOrder").and_then(|n| n.parse().ok());
+            let content = item.find("content").and_then(|c| {
+                c.borrow().get_attr("src").map(|p| self.root_base.join(p))
+            });
 
             let label = item.find("navLabel").and_then(|l| {
                 l.borrow()

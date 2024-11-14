@@ -74,7 +74,10 @@ impl<R: Read + Seek> EpubArchive<R> {
     /// # Errors
     ///
     /// Returns an error if the name doesn't exists in the zip archive.
-    pub fn get_entry<P: AsRef<Path>>(&mut self, name: P) -> Result<Vec<u8>, ArchiveError> {
+    pub fn get_entry<P: AsRef<Path>>(
+        &mut self,
+        name: P,
+    ) -> Result<Vec<u8>, ArchiveError> {
         let mut entry: Vec<u8> = vec![];
 
         let name = name.as_ref().to_str().ok_or(ArchiveError::PathUtf8)?;
@@ -91,7 +94,8 @@ impl<R: Read + Seek> EpubArchive<R> {
         };
 
         // try percent encoding
-        let name = percent_encoding::percent_decode(name.as_bytes()).decode_utf8()?;
+        let name =
+            percent_encoding::percent_decode(name.as_bytes()).decode_utf8()?;
         let mut zipfile = self.zip.by_name(&name)?;
         zipfile.read_to_end(&mut entry)?;
         Ok(entry)
@@ -102,7 +106,10 @@ impl<R: Read + Seek> EpubArchive<R> {
     /// # Errors
     ///
     /// Returns an error if the name doesn't exists in the zip archive.
-    pub fn get_entry_as_str<P: AsRef<Path>>(&mut self, name: P) -> Result<String, ArchiveError> {
+    pub fn get_entry_as_str<P: AsRef<Path>>(
+        &mut self,
+        name: P,
+    ) -> Result<String, ArchiveError> {
         let content = self.get_entry(name)?;
         String::from_utf8(content).map_err(ArchiveError::from)
     }
