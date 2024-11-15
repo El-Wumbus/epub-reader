@@ -28,9 +28,10 @@
 --background-color: {{ variables.bg_color }};
 --foreground-color: {{ variables.fg_color }};
 --content-width: {{ variables.content_width_em }}em;
+--content-font-size: {{ variables.content_font_size_px }}px;
 
---infobar-font-size: 18px;
---infobar-font-family: Iosevka, sans-serif;
+--infobar-font-size: var(--content-font-size);
+--infobar-font-family: Iosevka, Helvetica, Arial, sans-serif;
 --infobar-width: 5em;
 --infobar-margin: 0.2em;
 --pageinput-width: 1.5em;
@@ -38,20 +39,53 @@
 
 }
 
-:root {
-    width: 100%;
+:root, body, form, input, button, p {
+    color: var(--foreground-color); 
+    background-color: var(--background-color); 
+    font-size: var(--infobar-font-size);
+    font-family: var(--infobar-font-family);
 }
 
-form, input {
+
+#infobar, form, input {
     display: inline;
     border: none;
     align: left;
-    font-size: var(--infobar-font-size);
-    font-family: var(--infobar-font-family);
     padding: 0;
     margin: 0;
+    font-size: var(--infobar-font-size);
+    font-family: var(--infobar-font-family);
     background: solid;
+
+	color: var(--foreground-color);
     background-color: var(--background-color);
+}
+
+#infobar {
+    position: fixed;
+    top: 0;
+	left: 0;
+	height: 100%;
+    margin: var(--infobar-margin);
+    width: var(--infobar-width);
+    font-size: var(--infobar-font-size);
+    font-family: var(--infobar-font-family);
+}
+button {
+	display: inline-block;
+	background: transparent;
+	font-weight: bold;
+	border: 1px solid;
+	margin: 0.2em;
+}
+
+#navbuttons {
+	position: absolute;
+	left:    0;
+	bottom:   0;
+	display: inline;
+	padding: 0.5em;
+	margin-top: 0.2;
 }
 
 p {
@@ -72,19 +106,7 @@ p {
     left: 0;
 }
 
-#infobar {
-    position: fixed;
-    top: 0;
-    margin: var(--infobar-margin);
-    width: var(--infobar-width);
-    font-size: var(--infobar-font-size);
-    font-family: var(--infobar-font-family);
-}
 
-body,form, input, h1,h2,h3,h4,h5,h6 {
-    color: var(--foreground-color); 
-    background-color: var(--background-color); 
-}
 
 a {
     color: var(--color-primary-a30);

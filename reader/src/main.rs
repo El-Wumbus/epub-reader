@@ -1,5 +1,5 @@
 use epub::doc::EpubDoc;
-use log::{debug, error, info};
+use log::{debug, error};
 use rinja::Template;
 use std::io::{Cursor, Read};
 use tiny_http::{Header, Method, Request, Response, StatusCode};
@@ -117,7 +117,7 @@ impl<'a, R: std::io::Read + std::io::Seek> BookState<'a, R> {
         );
         let path = self.book.get_current_path().ok_or(())?;
         let path = path.to_str().unwrap();
-        info!(
+        debug!(
             "Moved to page: {}/{} at path \"{}\"",
             self.current_page + 1,
             self.page_count,
@@ -133,8 +133,7 @@ struct Config<'a> {
 }
 
 fn main() {
-    let mut builder = env_logger::Builder::new();
-    builder.filter_level(log::LevelFilter::Debug).init();
+    env_logger::Builder::from_env("READER_LOG").filter_level(log::LevelFilter::Info).write_style(env_logger::fmt::WriteStyle::Always).init();
     
     let config_home = slime::xdg::Dirs::config_home_dir().expect("home dir");
     let config_file = config_home.join("epub-reader").join("config.ini");
@@ -200,7 +199,7 @@ fn main() {
 
         let request_method = request.method();
         let request_url = request.url().to_string();
-        info!(
+        debug!(
             "Recevied request: method = {}, url = {}",
             request_method, request_url
         );
@@ -249,7 +248,7 @@ fn main() {
                 match req_body.trim() {
                     "+" => {
                         state.css_variables.content_font_size_px += 2;
-                        info!(
+                        debug!(
                             "Increasing font size from {} to {}",
                             state.css_variables.content_font_size_px - 2,
                             state.css_variables.content_font_size_px
@@ -260,7 +259,7 @@ fn main() {
                         if state.css_variables.content_font_size_px - 2 != 0 {
                             state.css_variables.content_font_size_px -= 2;
                         };
-                        info!(
+                        debug!(
                             "Decreasing font size from {} to {}",
                             state.css_variables.content_font_size_px + 2,
                             state.css_variables.content_font_size_px
@@ -275,7 +274,7 @@ fn main() {
                 state.css_variables.bg_color = state.css_variables.fg_color;
                 state.css_variables.fg_color = bg;
                 debug!("Inverted content styles: {:?}", state.css_variables);
-                info!("Inverted text color");
+                debug!("Inverted text color");
                 rcode(200)
             }
             (Method::Post, "/api/content-width") => {
@@ -288,7 +287,7 @@ fn main() {
                 match req_body.trim() {
                     "+" => {
                         state.css_variables.content_width_em += 1.0;
-                        info!(
+                        debug!(
                             "Increased content width to {}",
                             state.css_variables.content_width_em
                         );
@@ -298,7 +297,7 @@ fn main() {
                         if state.css_variables.content_width_em > 20.0 {
                             state.css_variables.content_width_em -= 1.0;
                         }
-                        info!(
+                        debug!(
                             "Increased content width to {}",
                             state.css_variables.content_width_em
                         );
@@ -363,13 +362,12 @@ fn main() {
                     state.book.root_base.join(req_url)
                 };
 
-                println!("{request_url} :: looking for {}", abs_url.display());
 
                 if let Some(idx) = state.book.resource_uri_to_chapter(&abs_url)
                 {
                     if idx != state.current_page {
                         state.current_page = idx;
-                        info!(
+                        debug!(
                             "Set page to {} / {}",
                             state.current_page + 1,
                             state.page_count
@@ -471,7 +469,7 @@ fn rcode(status: u16) -> Response<Cursor<Vec<u8>>> {
 fn respond<R: std::io::Read>(request: Request, response: Response<R>) {
     let request_url = request.url().to_string();
 
-    info!(
+    debug!(
         "Responding to {request_url} wtih status: {}",
         response.status_code().0
     );

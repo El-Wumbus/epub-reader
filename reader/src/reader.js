@@ -47,6 +47,14 @@ async function navigate_to_page() {
     location.href = location.origin + "/" + page;
 }
 
+async function previous_page_button() {
+	location.href = "/" + (await api_page("-"));
+}
+
+async function next_page_button() {
+	location.href = "/" + (await api_page("+"));
+}
+
 async function keybinds(key) {
     switch (key) {
         case "ArrowLeft":
