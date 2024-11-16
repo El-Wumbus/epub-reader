@@ -33,7 +33,7 @@
         </div>
     </body>
     <script type="application/javascript">
-        {{ reader_js }}
+        {{ javascript }}
     </script>
 </html>
 

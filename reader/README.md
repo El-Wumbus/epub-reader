@@ -1,2 +1,2 @@
 - Consider an option to display two pages alongside eachother.
-- Next/Prev UI buttons
+- Allow for opening multiple servers by trying subsequent ports if binding fails.
