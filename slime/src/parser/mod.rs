@@ -1,12 +1,17 @@
 pub mod ini;
 
-pub trait UnParser where Self: Iterator {
-    fn serialize<W: std::io::Write>(&mut self, to: &mut W) -> std::io::Result<()>;
+pub trait UnParser
+where
+    Self: Iterator, {
+    fn serialize<W: std::io::Write>(
+        &mut self,
+        to: &mut W,
+    ) -> std::io::Result<()>;
 
     fn serialize_into_bytes(&mut self, buf: &mut [u8]) -> std::io::Result<()> {
         self.serialize(&mut std::io::Cursor::new(buf))
     }
-    
+
     fn serialize_to_bytes(&mut self) -> std::io::Result<Vec<u8>> {
         let mut buf = std::io::Cursor::new(vec![]);
         self.serialize(&mut buf)?;
@@ -18,4 +23,3 @@ pub trait UnParser where Self: Iterator {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
 }
-

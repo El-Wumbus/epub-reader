@@ -1,9 +1,14 @@
 const API = {
+    QUIT: "/api/quit",
     PAGE: "/api/page",
     FONT_SIZE: "/api/font-size",
     INVERT_TEXT_COLOR: "/api/invert-text-color",
     CONTENT_WIDTH: "/api/content-width",
 };
+
+async function api_quit() {
+    const response = await fetch(API.QUIT, { method: "POST" });
+}
 
 async function api_page(action) {
     const response = await fetch(API.PAGE, {
@@ -41,18 +46,11 @@ async function api_content_width(action) {
     }
 }
 
-// This is called by the reader.xml
-async function navigate_to_page() {
-    const page = await api_page(document.getElementById("pageinput").value);
-    location.href = location.origin + "/" + page;
-}
-
-async function previous_page_button() {
-	location.href = "/" + (await api_page("-"));
-}
-
-async function next_page_button() {
-	location.href = "/" + (await api_page("+"));
+async function quit() {
+    if (confirm("Are you sure you want to stop the server?")) {
+        await api_quit();
+        close();
+    }
 }
 
 async function keybinds(key) {
@@ -82,6 +80,9 @@ async function keybinds(key) {
         case "]":
             await api_content_width("+");
             location.reload();
+            break;
+        case "q":
+            await quit();
             break;
         default:
             return;
@@ -118,4 +119,19 @@ frame.addEventListener("load", () => {
 /*window.addEventListener("load", () => {
     // Load preferences from cookies;
 });*/
+
+// This is called by the reader.xml
+async function navigate_to_page() {
+    const page = await api_page(document.getElementById("pageinput").value);
+    location.href = location.origin + "/" + page;
+}
+
+async function previous_page_button() {
+    location.href = "/" + (await api_page("-"));
+}
+
+async function next_page_button() {
+    location.href = "/" + (await api_page("+"));
+}
+const quit_button = quit;
 

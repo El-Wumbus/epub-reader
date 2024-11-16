@@ -79,13 +79,23 @@ impl<'a> Iterator for Parse<'a> {
     }
 }
 
-pub trait Parser where Self: Iterator {
+pub trait Parser
+where
+    Self: Iterator, {
 }
 
 impl<'a, T: Iterator<Item = Pair<'a>>> UnParser for T {
-    fn serialize<W: std::io::Write>(&mut self,to:&mut  W) -> std::io::Result<()> {
+    fn serialize<W: std::io::Write>(
+        &mut self,
+        to: &mut W,
+    ) -> std::io::Result<()> {
         let mut last_seen_section = "";
-        for Pair { section, key, value } in self {
+        for Pair {
+            section,
+            key,
+            value,
+        } in self
+        {
             if last_seen_section != section {
                 to.write_all(b"[")?;
                 to.write_all(section.as_bytes())?;
@@ -101,4 +111,3 @@ impl<'a, T: Iterator<Item = Pair<'a>>> UnParser for T {
         Ok(())
     }
 }
-

@@ -24,9 +24,10 @@
                     <form id="pageform" action="javascript:navigate_to_page();">
                         <input id="pageinput" type="text" name="page" value="{{current_page}}"/>
                 </form>/ {{page_count}}</div>
-				<div id="navbuttons">
-				<button id="next_page_button" onclick="next_page_button()">Next</button>
+                <div id="navbuttons">
                 <button id="previous_page_button" onclick="previous_page_button()">Prev</button>
+				<button id="next_page_button" onclick="next_page_button()">Next</button>
+                <button id="quit_button" onclick="quit_button()">Quit</button>
 			</div>
 
         </div>

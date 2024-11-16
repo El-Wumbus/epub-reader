@@ -1,15 +1,19 @@
+#![feature(duration_constructors)]
+
 use epub::doc::EpubDoc;
-use log::{debug, error};
+use log::{debug, error, info, warn};
 use rinja::Template;
+use slime::parser::{UnParser as _, ini};
 use std::io::{Cursor, Read};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, StatusCode};
-use slime::parser::{ini, UnParser as _};
 //use util::*;
 //mod util;
 pub const XHTML: &str = "application/xhtml+xml";
-    pub const HTML: &str = "text/html";
-    pub const JSON: &str = "application/json";
-    pub const CSS: &str = "text/css";
+pub const HTML: &str = "text/html";
+pub const JSON: &str = "application/json";
+pub const CSS: &str = "text/css";
 const READER_JS: &str = include_str!("reader.js");
 
 #[derive(Debug, Template)]
@@ -42,36 +46,33 @@ impl<'a> Default for CSSVariables<'a> {
     }
 }
 
-// parse from an INI file
-impl<'a> TryFrom<ini::Parse<'a>> for CSSVariables<'a> {
-    type Error = &'static str;
-
-    fn try_from(ini: ini::Parse<'a>) -> Result<CSSVariables<'a>, Self::Error> {
-        let mut vars = Self::default();
-        for ini::Pair { key, value, .. } in ini.filter(|x|x.section == "css") {
-            match key {
-                "fg_color" => vars.fg_color = value,
-                "bg_color" => vars.bg_color = value,
-                "content_font_size_px" => vars.content_font_size_px = value.parse().map_err(|_| "Invalid content_font_size_px")?,
-                "content_width_em" => vars.content_width_em = value.parse().map_err(|_| "Invalid content_width_em")?,
-                _ => {},
-            }
-        }
-
-        Ok(vars)
-    }
-}
-
-impl<'a> From<CSSVariables<'a>> for [ini::Pair<'a>;4] {
+impl<'a> From<CSSVariables<'a>> for [ini::Pair<'a>; 4] {
     fn from(vars: CSSVariables<'a>) -> Self {
         [
-            ini::Pair { section: "css", key: "fg_color", value: vars.fg_color},
-            ini::Pair { section: "css", key: "bg_color", value: vars.bg_color},
-            ini::Pair { section: "css", key: "content_font_size_px", value: Box::leak(Box::new(vars.content_font_size_px.to_string()))},
-            ini::Pair { section: "css", key: "content_width_em", value: Box::leak(Box::new(vars.content_width_em.to_string()))},
+            ini::Pair {
+                section: "css",
+                key: "fg_color",
+                value: vars.fg_color,
+            },
+            ini::Pair {
+                section: "css",
+                key: "bg_color",
+                value: vars.bg_color,
+            },
+            ini::Pair {
+                section: "css",
+                key: "content_font_size_px",
+                value: Box::leak(Box::new(
+                    vars.content_font_size_px.to_string(),
+                )),
+            },
+            ini::Pair {
+                section: "css",
+                key: "content_width_em",
+                value: Box::leak(Box::new(vars.content_width_em.to_string())),
+            },
         ]
     }
-
 }
 
 #[derive(Debug, Clone, Default, Template)]
@@ -86,14 +87,14 @@ struct ReaderStyles<'a> {
     variables: CSSVariables<'a>,
 }
 
-struct BookState<'a, R: std::io::Read + std::io::Seek> {
+struct State<'a, R: std::io::Read + std::io::Seek> {
     book: EpubDoc<R>,
     css_variables: CSSVariables<'a>,
     current_page: usize,
     page_count: usize,
 }
 
-impl<'a, R: std::io::Read + std::io::Seek> BookState<'a, R> {
+impl<'a, R: std::io::Read + std::io::Seek> State<'a, R> {
     fn new(book: EpubDoc<R>) -> Self {
         let page_count = book.get_num_pages();
         Self {
@@ -127,40 +128,158 @@ impl<'a, R: std::io::Read + std::io::Seek> BookState<'a, R> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct Config<'a> {
+    open_in_browser: bool,
+    kill_timeout: isize,
     css_variables: CSSVariables<'a>,
 }
 
+impl Config<'_> {
+    pub const S_FIELDS: usize = 6;
+}
+
+impl<'a> Default for Config<'a> {
+    fn default() -> Self {
+        Self {
+            open_in_browser: true,
+            kill_timeout: -1,
+            css_variables: CSSVariables::default(),
+        }
+    }
+}
+
+impl<'a> From<&Config<'a>> for [ini::Pair<'a>; Config::S_FIELDS] {
+    fn from(cfg: &Config<'a>) -> Self {
+        let css_variables: [ini::Pair<'a>; 4] = cfg.css_variables.into();
+        let open_in_browser = ini::Pair {
+            section: "",
+            key: "open_in_browser",
+            value: if cfg.open_in_browser { "true" } else { "false" },
+        };
+        [
+            css_variables[0],
+            css_variables[1],
+            css_variables[2],
+            css_variables[3],
+            ini::Pair {
+                section: "",
+                key: "kill_timeout",
+                value: Box::leak(Box::new(cfg.kill_timeout.to_string())),
+            },
+            open_in_browser,
+        ]
+    }
+}
+
+impl<'a> TryFrom<ini::Parse<'a>> for Config<'a> {
+    type Error = &'static str;
+
+    fn try_from(ini: ini::Parse<'a>) -> Result<Self, Self::Error> {
+        let mut x = Self::default();
+        for ini::Pair {
+            section,
+            key,
+            value,
+        } in ini
+        {
+            match (section, key) {
+                ("", "open_in_browser") => {
+                    x.open_in_browser = value.parse::<bool>().map_err(
+                        |_| "Invalid boolean value for 'open_in_browser'",
+                    )?
+                }
+                ("css", "fg_color") => x.css_variables.fg_color = value,
+                ("css", "bg_color") => x.css_variables.bg_color = value,
+                ("css", "content_font_size_px") => {
+                    x.css_variables.content_font_size_px = value
+                        .parse()
+                        .map_err(|_| "Invalid content_font_size_px")?
+                }
+                ("css", "content_width_em") => {
+                    x.css_variables.content_width_em =
+                        value.parse().map_err(|_| "Invalid content_width_em")?
+                }
+                _ => {}
+            }
+        }
+
+        Ok(x)
+    }
+}
+
 fn main() {
-    env_logger::Builder::from_env("READER_LOG").filter_level(log::LevelFilter::Info).write_style(env_logger::fmt::WriteStyle::Always).init();
-    
+    env_logger::Builder::from_env("READER_LOG")
+        .filter_level(log::LevelFilter::Info)
+        .write_style(env_logger::fmt::WriteStyle::Always)
+        .init();
+
+    let config = Config::default();
+
     let config_home = slime::xdg::Dirs::config_home_dir().expect("home dir");
     let config_file = config_home.join("epub-reader").join("config.ini");
 
+    fn ap_expect_next<V>(x: Option<V>) -> V {
+        match x {
+            Some(v) => v,
+            None => {
+                error!("Expected a value for this flag but got nothing!");
+                std::process::exit(1);
+            }
+        }
+    }
+
     debug!("Using \"{}\" as config file", config_file.display());
-    let config = if !config_file.exists() {
-        let config = Config::default();
+    let mut config: Config = if !config_file.exists() {
         if let Some(parent) = config_file.parent() {
             if !parent.exists() {
                 std::fs::create_dir_all(parent).expect("create parent dir");
             }
         }
         let mut config_f = std::fs::File::create(&config_file).unwrap();
-        let ting: [ini::Pair;4] = config.css_variables.into();
-        ting.into_iter().serialize(&mut config_f).expect("good time writing to file");
+        let ting: [ini::Pair; Config::S_FIELDS] = (&config).into();
+        ting.into_iter()
+            .serialize(&mut config_f)
+            .expect("good time writing to file");
         config
     } else {
         let config_s = std::fs::read_to_string(&config_file).unwrap();
         let config_s = Box::leak(Box::new(config_s));
         let i = ini::Parse::from(config_s.as_str());
-        Config { css_variables: i.try_into().expect("valid config") }
+        i.try_into().expect("valid config")
     };
 
-    let args = std::env::args();
-    let book = args
-        .skip(1)
-        .next()
+    let mut args = std::env::args().skip(1);
+    let mut positional = vec![];
+    while let Some(arg) = args.next() {
+        if arg.starts_with('-') {
+            let arg = arg.to_lowercase();
+            let arg = &arg[1..];
+            match arg {
+                "open-in-browser" => {
+                    config.open_in_browser = true;
+                }
+                "kill-timeout" => {
+                    let kt = ap_expect_next(args.next());
+                    match kt.parse::<isize>() {
+                        Ok(x) => config.kill_timeout = x,
+                        Err(e) => {
+                            error!("Invalid value \"{kt}\": {e}");
+                            return;
+                        }
+                    }
+                }
+                _ => {
+                    warn!("Unrecognized flag \"-{arg}\"!");
+                }
+            }
+        } else {
+            positional.push(arg);
+        }
+    }
+
+    let book = positional
+        .get(0)
         .expect("filename to be provided as the first command-line argument");
 
     let mut book = std::fs::File::open(book).expect("File to open properly");
@@ -183,14 +302,57 @@ fn main() {
         .unwrap_or("Missing Title")
         .to_string();
 
-    let mut state = BookState::new(book);
+    let mut state = State::new(book);
     state.css_variables = config.css_variables;
 
     let server = tiny_http::Server::http("localhost:6969").unwrap();
+    let mut browser_spawner = None;
 
+    let (wd_tx, wd_rx) = mpsc::channel();
+    let _watchdog = if config.kill_timeout < 0 {
+        None
+    } else {
+        let kill_timeout = config.kill_timeout as usize;
+        Some({
+            std::thread::spawn(move || {
+                let timeout_duration = Duration::from_mins(kill_timeout as u64);
+                let mut last_request = Instant::now();
+                loop {
+                    if let Ok(last) = wd_rx.try_recv() {
+                        last_request = last;
+                    }
+                    let elapsed = last_request.elapsed();
+                    if elapsed > timeout_duration {
+                        std::process::exit(1);
+                    }
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+            })
+        })
+    };
+
+    if config.open_in_browser {
+        browser_spawner = Some(std::thread::spawn(|| {
+            let _xdg_open = std::process::Command::new("xdg-open")
+                .args(["http://localhost:6969"])
+                .output()
+                .expect("Couldn't open browser");
+        }));
+        // TODO: replace with library to elimiate dependency on xdg-open.
+    }
     loop {
+        if browser_spawner.as_ref().is_some_and(|x| x.is_finished()) {
+            let t = browser_spawner.unwrap();
+            if let Err(e) = t.join() {
+                error!("Broswer thread: {e:?}");
+            }
+            browser_spawner = None;
+        }
         let mut request = match server.recv() {
-            Ok(rq) => rq,
+            Ok(rq) => {
+                wd_tx.send(Instant::now()).unwrap();
+                rq
+            }
             Err(e) => {
                 error!("server: {}", e);
                 break;
@@ -205,6 +367,11 @@ fn main() {
         );
 
         let response = match (request_method, request_url.as_str()) {
+            (&Method::Post, "/api/quit") => {
+                respond(request, rcode(200));
+                info!("Quitting...");
+                break;
+            }
             (&Method::Post, "/api/page") => {
                 let mut req_body = String::new();
                 request.as_reader().read_to_string(&mut req_body).unwrap();
@@ -362,7 +529,6 @@ fn main() {
                     state.book.root_base.join(req_url)
                 };
 
-
                 if let Some(idx) = state.book.resource_uri_to_chapter(&abs_url)
                 {
                     if idx != state.current_page {
@@ -404,8 +570,7 @@ fn main() {
                         rv.render().expect("thing inside thing"),
                     )
                     .with_header(
-                        Header::from_bytes(b"Content-Type", XHTML)
-                            .unwrap(),
+                        Header::from_bytes(b"Content-Type", XHTML).unwrap(),
                     )
                 } else {
                     let (Some(data), Some(mime)) = (
