@@ -5,20 +5,21 @@ use epub::doc::EpubDoc;
 use log::{debug, error, info, warn};
 use rinja::Template;
 use slime::parser::{UnParser as _, ini};
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
+use std::process::exit;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, StatusCode};
-//use util::*;
-//mod util;
 pub const XHTML: &str = "application/xhtml+xml";
 pub const HTML: &str = "text/html";
 pub const JSON: &str = "application/json";
 pub const CSS: &str = "text/css";
 const READER_JS: &str = include_str!("reader.js");
 
+/// Application state.
 struct State<'a> {
     book: EpubDoc<Cursor<Vec<u8>>>,
+    socket_addr: std::net::SocketAddr,
     css_variables: CSSVariables<'a>,
     current_page: usize,
     page_count: usize,
@@ -29,12 +30,17 @@ impl State<'_> {
         let page_count = book.get_num_pages();
         Self {
             book,
+            socket_addr: std::net::SocketAddr::new(
+                std::net::Ipv4Addr::LOCALHOST.into(),
+                0,
+            ),
             css_variables: CSSVariables::default(),
             current_page: 0,
             page_count,
         }
     }
 
+    /// Change the current page based on some predicate `pred`.
     fn change_page(
         &mut self,
         pred: impl Fn(usize, usize) -> usize,
@@ -47,7 +53,8 @@ impl State<'_> {
             "page index should be valid"
         );
         let path = self.book.get_current_path().ok_or(())?;
-        let path = path.to_str().unwrap();
+        let path = path.to_str().unwrap(); // TODO: Does epub-rs convert utf16 paths to utf8? Epubs
+        // are garuenteed to be one of these.
         debug!(
             "Moved to page: {}/{} at path \"{}\"",
             self.current_page + 1,
@@ -57,47 +64,256 @@ impl State<'_> {
         Ok(Response::from_string(path))
     }
 }
+
+#[derive(Debug, Clone)]
+struct Config<'a> {
+    open_in_browser: bool,
+    kill_timeout: isize,
+    bind_addr: &'a str,
+    bind_port: u16,
+    css_variables: CSSVariables<'a>,
+}
+
+impl Config<'_> {
+    /// The number of INI fields when serialized.
+    pub const S_FIELDS: usize = 8;
+    pub const DEFAULT_BIND_ADDR: &'static str = "localhost";
+    pub const DEFAULT_BIND_PORT: u16 = 0;
+}
+
+impl Default for Config<'_> {
+    fn default() -> Self {
+        Self {
+            bind_addr: Self::DEFAULT_BIND_ADDR,
+            bind_port: Self::DEFAULT_BIND_PORT,
+            open_in_browser: false,
+            kill_timeout: -1,
+            css_variables: CSSVariables::default(),
+        }
+    }
+}
+
+impl<'a> From<&Config<'a>> for [ini::Pair<'a>; Config::S_FIELDS] {
+    /// Create serializeable INI key-value pairs for [`Config`].
+    fn from(cfg: &Config<'a>) -> Self {
+        let css_variables: [ini::Pair<'a>; 4] = cfg.css_variables.into();
+        [
+            ini::Pair {
+                section: "",
+                key: "open_in_browser",
+                value: if cfg.open_in_browser { "true" } else { "false" },
+            },
+            ini::Pair {
+                section: "",
+                key: "kill_timeout",
+                value: Box::leak(Box::new(cfg.kill_timeout.to_string())),
+            },
+            ini::Pair {
+                section: "",
+                key: "bind_addr",
+                value: cfg.bind_addr,
+            },
+            ini::Pair {
+                section: "",
+                key: "bind_port",
+                value: Box::leak(Box::new(cfg.bind_port.to_string())),
+            },
+            css_variables[0],
+            css_variables[1],
+            css_variables[2],
+            css_variables[3],
+        ]
+    }
+}
+
+impl<'a> TryFrom<ini::Parse<'a>> for Config<'a> {
+    type Error = &'static str;
+
+    /// Deserialize from a parsed INI.
+    fn try_from(ini: ini::Parse<'a>) -> Result<Self, Self::Error> {
+        let mut x = Self::default();
+        for ini::Pair {
+            section,
+            key,
+            value,
+        } in ini
+        {
+            match (section, key) {
+                ("", "bind_addr") => {
+                    x.bind_addr = value;
+                }
+                ("", "bind_port") => {
+                    x.bind_port =
+                        value.parse().map_err(|_| "Invalid bind_port")?;
+                }
+                ("", "open_in_browser") => {
+                    x.open_in_browser = value.parse::<bool>().map_err(
+                        |_| "Invalid boolean value for 'open_in_browser'",
+                    )?;
+                }
+                ("css", "fg_color") => x.css_variables.fg_color = value,
+                ("css", "bg_color") => x.css_variables.bg_color = value,
+                ("css", "content_font_size_px") => {
+                    x.css_variables.content_font_size_px = value
+                        .parse()
+                        .map_err(|_| "Invalid content_font_size_px")?;
+                }
+                ("css", "content_width_em") => {
+                    x.css_variables.content_width_em = value
+                        .parse()
+                        .map_err(|_| "Invalid content_width_em")?;
+                }
+                _ => {}
+            }
+        }
+
+        Ok(x)
+    }
+}
+
+#[derive(Debug, Template)]
+#[template(ext = "xhtml", path = "reader.xml")]
+struct Reader<'a> {
+    title: &'a str,
+    stylesheet: &'a str,
+    javascript: &'a str,
+    page_url: &'a str,
+    current_page: usize,
+    page_count: usize,
+}
+
+#[derive(Debug, Clone, Default, Template)]
+#[template(path = "content_styles.css", escape = "none")]
+struct ContentStyles<'a> {
+    variables: CSSVariables<'a>,
+}
+
+#[derive(Debug, Clone, Default, Template)]
+#[template(path = "reader.css", escape = "none")]
+struct ReaderStyles<'a> {
+    variables: CSSVariables<'a>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CSSVariables<'a> {
+    fg_color: &'a str,
+    bg_color: &'a str,
+    content_width_em: f32,
+    content_font_size_px: u32,
+}
+
+impl Default for CSSVariables<'_> {
+    fn default() -> Self {
+        Self {
+            fg_color: "var(--color-primary-a50)",
+            bg_color: "var(--color-surface-a0)",
+            content_font_size_px: 21,
+            content_width_em: 36.0,
+        }
+    }
+}
+
+impl<'a> From<CSSVariables<'a>> for [ini::Pair<'a>; 4] {
+    fn from(vars: CSSVariables<'a>) -> Self {
+        [
+            ini::Pair {
+                section: "css",
+                key: "fg_color",
+                value: vars.fg_color,
+            },
+            ini::Pair {
+                section: "css",
+                key: "bg_color",
+                value: vars.bg_color,
+            },
+            ini::Pair {
+                section: "css",
+                key: "content_font_size_px",
+                value: Box::leak(Box::new(
+                    vars.content_font_size_px.to_string(),
+                )),
+            },
+            ini::Pair {
+                section: "css",
+                key: "content_width_em",
+                value: Box::leak(Box::new(vars.content_width_em.to_string())),
+            },
+        ]
+    }
+}
+
+/// Parse all the command-line flags and set the [`Config`] accordingly.
 fn parse_args(config: &mut Config) -> Vec<String> {
     fn expect_next<V>(x: Option<V>) -> V {
         if let Some(v) = x {
             v
         } else {
-            error!("Expected a value for this flag but got nothing!");
-            std::process::exit(1);
+            error!("FATAL: Expected a value for this flag but got nothing!");
+            exit(1);
         }
     }
 
     let mut args = std::env::args().skip(1);
     let mut positional = vec![];
+    let mut was_error = false;
     while let Some(arg) = args.next() {
         if arg.starts_with('-') {
             let arg = arg.to_lowercase();
             let arg = &arg[1..];
             match arg {
-                "open-in-browser" => {
-                    config.open_in_browser = true;
+                "usage" => {
+                    print_usage();
+                    exit(0);
                 }
-                "bind" => {
-                    config.bind = Box::leak(Box::new(expect_next(args.next())));
+                "open-in-browser" => {
+                    let oib = expect_next(args.next());
+                    match oib.parse::<bool>() {
+                        Ok(b) => config.open_in_browser = b,
+                        Err(e) => {
+                            error!(
+                                "FATAL: Invalid value for flag -{arg} \"{oib}\": {e}"
+                            );
+                            was_error = true;
+                        }
+                    }
+                }
+                "bind-addr" => {
+                    config.bind_addr =
+                        Box::leak(Box::new(expect_next(args.next())));
+                }
+                "bind-port" => {
+                    let x = expect_next(args.next());
+                    match x.parse() {
+                        Ok(x) => config.bind_port = x,
+                        Err(e) => {
+                            error!(
+                                "FATAL: Invalid value for flag -{arg} \"{x}\": {e}"
+                            );
+                            was_error = true;
+                        }
+                    }
                 }
                 "kill-timeout" => {
                     let kt = expect_next(args.next());
                     match kt.parse::<isize>() {
                         Ok(x) => config.kill_timeout = x,
                         Err(e) => {
-                            error!("Invalid value \"{kt}\": {e}");
-                            std::process::exit(1);
+                            error!(
+                                "FATAL: Invalid value for flag -{arg} \"{kt}\": {e}"
+                            );
+                            was_error = true;
                         }
                     }
                 }
                 unrecognized_flag => {
+                    was_error = true;
                     if unrecognized_flag.starts_with('-') {
                         let f = unrecognized_flag.trim_start_matches('-');
-                        warn!(
-                            "Unrecognized flag \"-{arg}\"! I expect flags with a single \"-\", did you mean \"-{f}\"?"
+                        error!(
+                            "FATAL: Unrecognized flag \"-{arg}\"! I expect flags with a single \"-\", did you mean \"-{f}\"?"
                         );
                     } else {
-                        warn!("Unrecognized flag \"-{arg}\"!");
+                        error!("FATAL: Unrecognized flag \"-{arg}\"!");
                     }
                 }
             }
@@ -105,56 +321,155 @@ fn parse_args(config: &mut Config) -> Vec<String> {
             positional.push(arg);
         }
     }
+
+    if was_error {
+        print_usage();
+        exit(1);
+    }
     positional
 }
 
+fn print_usage() {
+    let program_name = std::env::args()
+        .nth(0)
+        .unwrap_or_else(|| String::from("epub-reader"));
+    let program_name = std::path::PathBuf::from(program_name);
+    let program_name = program_name
+        .file_name()
+        .unwrap()
+        .to_str()
+        .expect("We made this from a utf8 string");
+    println!("Usage: {program_name} [flags] <epub>
+    -usage              Display this message
+    -open-in-browser    Opens the the bind url in the default application (web browser)
+                        default: false
+    -bind-addr          Set the bind address
+                        default: '{default_bind_addr}:bind_port'
+    -bind-port          Set the bind port
+                        default: '{default_bind_port}'
+    -kill-timeout       Set the inactivity timeout, after which the server quits.
+                        default: -1 (disabled).",
+                        default_bind_addr = Config::DEFAULT_BIND_ADDR,
+                        default_bind_port = Config::DEFAULT_BIND_PORT);
+}
+
 fn main() -> Result<(), ()> {
+    fn respond<R: std::io::Read>(request: Request, response: Response<R>) {
+        let request_url = request.url().to_string();
+
+        debug!(
+            "Responding to {request_url} wtih status: {}",
+            response.status_code().0
+        );
+        if let Err(e) = request.respond(response) {
+            error!("Failed to respond to {request_url}: {}", e);
+        }
+    }
+    fn response_invalid_utf8() -> Response<Cursor<Vec<u8>>> {
+        Response::from_string("400\nInvalid request body: Expected valid UTF-8")
+            .with_status_code(StatusCode(400))
+    }
+    fn rcode(status: u16) -> Response<Cursor<Vec<u8>>> {
+        Response::from_string(status.to_string())
+            .with_status_code(StatusCode(status))
+    }
+
     env_logger::Builder::from_env("READER_LOG")
         .filter_level(log::LevelFilter::Info)
         .write_style(env_logger::fmt::WriteStyle::Always)
         .init();
 
     let config = Config::default();
-    let config_home = slime::xdg::Dirs::config_home_dir().expect("home dir");
+    let config_home = match slime::xdg::Dirs::config_home_dir() {
+        Some(h) => h,
+        None => {
+            error!("FATAL: Couldn't find config directory!");
+            exit(1);
+        }
+    };
     let config_file = config_home.join("epub-reader").join("config.ini");
-
     debug!("Using \"{}\" as config file", config_file.display());
+
     let mut config: Config = if config_file.exists() {
-        let config_s = std::fs::read_to_string(&config_file).unwrap();
-        let config_s = Box::leak(Box::new(config_s));
-        let i = ini::Parse::from(config_s.as_str());
-        i.try_into().expect("valid config")
-    } else {
-        if let Some(parent) = config_file.parent() {
-            if !parent.exists() {
-                std::fs::create_dir_all(parent).expect("create parent dir");
+        match std::fs::read_to_string(&config_file) {
+            Ok(contents) => {
+                let contents = Box::leak(Box::new(contents));
+                match ini::Parse::from(contents.as_str()).try_into() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!("FATAL: Invalid configuration file: {e}");
+                        exit(1);
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    "Couldn't read configuration file \"{}\": {e}. Using default configurations.",
+                    config_file.display()
+                );
+                config
             }
         }
-        let mut config_f = std::fs::File::create(&config_file).unwrap();
-        let ting: [ini::Pair; Config::S_FIELDS] = (&config).into();
-        ting.into_iter()
-            .serialize(&mut config_f)
-            .expect("good time writing to file");
+    } else {
+        let mut c = true;
+        let cs: [ini::Pair; Config::S_FIELDS] = (&config).into();
+        let contents = cs
+            .into_iter()
+            .serialize_to_bytes()
+            .expect("This valid config shouldn't fail to serialize");
+        if let Some(parent) = config_file.parent() {
+            if !parent.exists() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    c = false;
+                    error!(
+                        "Couldn't create configuration file's missing parent directory: \"{}\": {e}",
+                        parent.display()
+                    );
+                }
+            }
+        }
+
+        if c {
+            if let Err(e) = std::fs::File::create(&config_file)
+                .and_then(|mut f| f.write_all(&contents))
+            {
+                error!(
+                    "Failed to save config to file \"{}\": {e}",
+                    config_file.display()
+                );
+            }
+        }
         config
     };
 
     let mut positionals = parse_args(&mut config).into_iter();
-    let Some(book) = positionals.next() else {
+    let Some(book_arg) = positionals.next() else {
         error!(
-            "Expected an EPUB file to be provided as the first positional argument"
+            "FATAL: Expected an EPUB file to be provided as the first positional argument"
         );
-        return Err(());
+        print_usage();
+        exit(1);
     };
 
-    // TODO: report errors instead of unrapping.
-    let mut book = std::fs::File::open(book).expect("File to open properly");
-    let mut book_buffer = Vec::new();
-    book.read_to_end(&mut book_buffer).expect("readable file");
-    let book = match EpubDoc::from_reader(Cursor::new(book_buffer)) {
-        Ok(b) => b,
+    let book = match std::fs::File::open(&book_arg).and_then(|mut f| {
+        let mut bookbuf = vec![];
+        f.read_to_end(&mut bookbuf)?;
+        Ok(bookbuf)
+    }) {
+        Ok(book) => match EpubDoc::from_reader(Cursor::new(book)) {
+            Ok(b) => b,
+            Err(e) => {
+                error!(
+                    "FATAL: Failed to read provided file \"{book_arg}\": {e}"
+                );
+                exit(1);
+            }
+        },
         Err(e) => {
-            error!("Invalid EPUB archive: {e}");
-            return Err(());
+            error!(
+                "FATAL: Failed to open provided book file \"{book_arg}\": {e}"
+            );
+            exit(1);
         }
     };
     debug!(
@@ -174,9 +489,28 @@ fn main() -> Result<(), ()> {
 
     let mut state = State::new(book);
     state.css_variables = config.css_variables;
+    let server =
+        match tiny_http::Server::http((config.bind_addr, config.bind_port)) {
+            Ok(s) => s,
+            Err(e) => {
+                error!(
+                    "FATAL: failed to bind to {}:{}: {e}!",
+                    config.bind_addr, config.bind_port
+                );
+                exit(1);
+            }
+        };
+    state.socket_addr = server.server_addr().to_ip().unwrap();
+    info!(
+        "Bound server to {}:{}",
+        config.bind_addr,
+        state.socket_addr.port()
+    );
 
-    let server = tiny_http::Server::http(config.bind).unwrap();
-
+    // Create a "watchdog" thread to kill the server after some time of
+    // inactivity. TODO: This could be reimplemented to use a single thread
+    // by not blocking the server thread and instead sleeping
+    // between requests.
     let (wd_tx, wd_rx) = mpsc::channel();
     let _watchdog = if config.kill_timeout < 0 {
         None
@@ -192,7 +526,7 @@ fn main() -> Result<(), ()> {
                     }
                     let elapsed = last_request.elapsed();
                     if elapsed > timeout_duration {
-                        std::process::exit(1);
+                        exit(0);
                     }
                     std::thread::sleep(Duration::from_secs(2));
                 }
@@ -201,16 +535,26 @@ fn main() -> Result<(), ()> {
     };
 
     if config.open_in_browser {
-        // TODO: replace with library to elimiate dependency on xdg-open/xdg-utils.
-        if let Err(e) = std::process::Command::new("xdg-open")
-            .arg(format!("http://{}", config.bind))
-            .output()
-        {
-            error!("Could't open browser: {e}");
+        let cmd = std::process::Command::new("xdg-open")
+            .arg(format!(
+                "http://{}:{}",
+                config.bind_addr,
+                state.socket_addr.port()
+            ))
+            .output();
+        match cmd {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => error!(
+                "Failed to open in browser: xdg-open: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ),
+            Err(e) => {
+                error!("Failed to open in browser: failed to spawn child: {e}");
+            }
         }
     }
-    let mut quit = false;
 
+    let mut quit = false;
     while !quit {
         let mut request = match server.recv() {
             Ok(rq) => {
@@ -218,8 +562,8 @@ fn main() -> Result<(), ()> {
                 rq
             }
             Err(e) => {
-                error!("server: {}", e);
-                std::process::exit(1);
+                error!("FATAL: {e}");
+                exit(1);
             }
         };
 
@@ -229,7 +573,6 @@ fn main() -> Result<(), ()> {
             request.method(),
             request_url
         );
-
         let response = match (request_url.as_str(), request.method()) {
             ("/", &Method::Get) | ("/reader", &Method::Get) => {
                 // Redirect to the current page
@@ -253,7 +596,12 @@ fn main() -> Result<(), ()> {
             ("/api/page", &Method::Post) => {
                 let mut req_body = String::new();
                 // TODO: Stop unwrapping and error handle properly
-                request.as_reader().read_to_string(&mut req_body).unwrap();
+                if let Err(_e) =
+                    request.as_reader().read_to_string(&mut req_body)
+                {
+                    respond(request, response_invalid_utf8());
+                    continue;
+                }
 
                 match req_body.trim() {
                     "+" => match state.change_page(|page, page_count| {
@@ -291,7 +639,12 @@ fn main() -> Result<(), ()> {
             ("/api/font-size", &Method::Post) => {
                 let mut req_body = String::new();
                 // TODO: Stop unwrapping and error handle properly
-                request.as_reader().read_to_string(&mut req_body).unwrap();
+                if let Err(_e) =
+                    request.as_reader().read_to_string(&mut req_body)
+                {
+                    respond(request, response_invalid_utf8());
+                    continue;
+                }
                 match req_body.trim() {
                     "+" => {
                         state.css_variables.content_font_size_px += 2;
@@ -328,10 +681,12 @@ fn main() -> Result<(), ()> {
             ("/api/content-width", &Method::Post) => {
                 let mut req_body = String::new();
                 // TODO: Stop unwrapping and error handle properly
-                request
-                    .as_reader()
-                    .read_to_string(&mut req_body)
-                    .expect("the client should send a string");
+                if let Err(_e) =
+                    request.as_reader().read_to_string(&mut req_body)
+                {
+                    respond(request, response_invalid_utf8());
+                    continue;
+                }
 
                 match req_body.trim() {
                     "+" => {
@@ -463,6 +818,8 @@ fn main() -> Result<(), ()> {
     Ok(())
 }
 
+/// Add the `stylesheet` to the end of the XHTML Header found in `src`. This
+/// does nothing if `src` doesn't have an HTML header.
 fn inject_styles(src: &str, stylesheet: &str) -> String {
     use xmlparser::{ElementEnd, Token};
     let mut output = String::with_capacity(src.len() + stylesheet.len());
@@ -489,186 +846,11 @@ fn inject_styles(src: &str, stylesheet: &str) -> String {
             Ok(t) => {
                 output.push_str(t.span().as_str());
             }
-            Err(e) => panic!("XML parse error: {e}"),
+            Err(e) => {
+                error!("FATAL: XML parsing error: {e}");
+                exit(1);
+            }
         }
     }
     output
-}
-
-fn rcode(status: u16) -> Response<Cursor<Vec<u8>>> {
-    Response::from_string(status.to_string())
-        .with_status_code(StatusCode(status))
-}
-
-fn respond<R: std::io::Read>(request: Request, response: Response<R>) {
-    let request_url = request.url().to_string();
-
-    debug!(
-        "Responding to {request_url} wtih status: {}",
-        response.status_code().0
-    );
-    if let Err(e) = request.respond(response) {
-        error!("Failed to respond to {request_url}: {}", e);
-    }
-}
-
-#[derive(Debug, Template)]
-#[template(ext = "xhtml", path = "reader.xml")]
-struct Reader<'a> {
-    title: &'a str,
-    stylesheet: &'a str,
-    javascript: &'a str,
-    page_url: &'a str,
-    current_page: usize,
-    page_count: usize,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CSSVariables<'a> {
-    fg_color: &'a str,
-    bg_color: &'a str,
-    content_width_em: f32,
-    content_font_size_px: u32,
-}
-
-impl Default for CSSVariables<'_> {
-    fn default() -> Self {
-        Self {
-            fg_color: "var(--color-primary-a50)",
-            bg_color: "var(--color-surface-a0)",
-            content_font_size_px: 21,
-            content_width_em: 36.0,
-        }
-    }
-}
-
-impl<'a> From<CSSVariables<'a>> for [ini::Pair<'a>; 4] {
-    fn from(vars: CSSVariables<'a>) -> Self {
-        [
-            ini::Pair {
-                section: "css",
-                key: "fg_color",
-                value: vars.fg_color,
-            },
-            ini::Pair {
-                section: "css",
-                key: "bg_color",
-                value: vars.bg_color,
-            },
-            ini::Pair {
-                section: "css",
-                key: "content_font_size_px",
-                value: Box::leak(Box::new(
-                    vars.content_font_size_px.to_string(),
-                )),
-            },
-            ini::Pair {
-                section: "css",
-                key: "content_width_em",
-                value: Box::leak(Box::new(vars.content_width_em.to_string())),
-            },
-        ]
-    }
-}
-
-#[derive(Debug, Clone, Default, Template)]
-#[template(path = "content_styles.css", escape = "none")]
-struct ContentStyles<'a> {
-    variables: CSSVariables<'a>,
-}
-
-#[derive(Debug, Clone, Default, Template)]
-#[template(path = "reader.css", escape = "none")]
-struct ReaderStyles<'a> {
-    variables: CSSVariables<'a>,
-}
-
-#[derive(Debug, Clone)]
-struct Config<'a> {
-    open_in_browser: bool,
-    kill_timeout: isize,
-    bind: &'a str,
-    css_variables: CSSVariables<'a>,
-}
-
-impl Config<'_> {
-    pub const S_FIELDS: usize = 7;
-}
-
-impl Default for Config<'_> {
-    fn default() -> Self {
-        Self {
-            bind: "localhost:6969",
-            open_in_browser: true,
-            kill_timeout: -1,
-            css_variables: CSSVariables::default(),
-        }
-    }
-}
-
-impl<'a> From<&Config<'a>> for [ini::Pair<'a>; Config::S_FIELDS] {
-    fn from(cfg: &Config<'a>) -> Self {
-        let css_variables: [ini::Pair<'a>; 4] = cfg.css_variables.into();
-        [
-            ini::Pair {
-                section: "",
-                key: "open_in_browser",
-                value: if cfg.open_in_browser { "true" } else { "false" },
-            },
-            ini::Pair {
-                section: "",
-                key: "kill_timeout",
-                value: Box::leak(Box::new(cfg.kill_timeout.to_string())),
-            },
-            ini::Pair {
-                section: "",
-                key: "bind",
-                value: cfg.bind,
-            },
-            css_variables[0],
-            css_variables[1],
-            css_variables[2],
-            css_variables[3],
-        ]
-    }
-}
-
-impl<'a> TryFrom<ini::Parse<'a>> for Config<'a> {
-    type Error = &'static str;
-
-    fn try_from(ini: ini::Parse<'a>) -> Result<Self, Self::Error> {
-        let mut x = Self::default();
-        for ini::Pair {
-            section,
-            key,
-            value,
-        } in ini
-        {
-            match (section, key) {
-                ("", "bind") => {
-                    x.bind = value;
-                }
-                ("", "open_in_browser") => {
-                    x.open_in_browser = value.parse::<bool>().map_err(
-                        |_| "Invalid boolean value for 'open_in_browser'",
-                    )?;
-                }
-                ("css", "fg_color") => x.css_variables.fg_color = value,
-                ("css", "bg_color") => x.css_variables.bg_color = value,
-                ("css", "content_font_size_px") => {
-                    x.css_variables.content_font_size_px = value
-                        .parse()
-                        .map_err(|_| "Invalid content_font_size_px")?;
-                }
-                ("css", "content_width_em") => {
-                    x.css_variables.content_width_em = value
-                        .parse()
-                        .map_err(|_| "Invalid content_width_em")?;
-                }
-                _ => {}
-            }
-        }
-
-        Ok(x)
-    }
 }

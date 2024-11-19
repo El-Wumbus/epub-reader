@@ -1,4 +1,5 @@
 max_width = 80
 enum_discrim_align_threshold = 32
 brace_style = "PreferSameLine"
+wrap_comments = true
 

@@ -3,6 +3,5 @@ resolver = "2"
 members = [
     "reader",
     "epub-rs",
-"slime",
 ]
 

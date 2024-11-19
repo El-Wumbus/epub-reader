@@ -1,2 +1,1 @@
 - Consider an option to display two pages alongside eachother.
-- Allow for opening multiple servers by trying subsequent ports if binding fails.

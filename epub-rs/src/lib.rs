@@ -21,12 +21,12 @@
 //! let doc = EpubDoc::new("test.epub");
 //! assert!(doc.is_ok());
 //! let doc = doc.unwrap();
-//!
 //! ```
 //!
 //! ## Getting doc metadata
 //!
-//! Metadata is a [`HashMap`](std::collections::HashMap) storing all metadata defined in the epub
+//! Metadata is a [`HashMap`](std::collections::HashMap) storing all metadata
+//! defined in the epub
 //!
 //! ```
 //! # use epub::doc::EpubDoc;

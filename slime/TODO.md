@@ -1,4 +1,0 @@
-- MIME types 
-- MIME type enumeration
-- Simple PRNG
-- XDG defaults enumeration

@@ -206,7 +206,8 @@ impl<R: Read + Seek> EpubDoc<R> {
 
     /// Returns the id of the epub cover.
     ///
-    /// The cover is searched in the doc metadata, by the tag `<meta name="cover" value"..">`
+    /// The cover is searched in the doc metadata, by the tag `<meta
+    /// name="cover" value"..">`
     ///
     /// # Examples
     ///
@@ -255,7 +256,6 @@ impl<R: Read + Seek> EpubDoc<R> {
 
     /// Returns Release Identifier defined at
     /// <https://www.w3.org/publishing/epub32/epub-packages.html#sec-metadata-elem-identifiers-pid>
-    ///
     pub fn get_release_identifier(&self) -> Option<String> {
         match (
             self.unique_identifier.as_ref(),
@@ -278,7 +278,8 @@ impl<R: Read + Seek> EpubDoc<R> {
         self.archive.get_entry(path).ok()
     }
 
-    /// Returns the resource content and mime-type by the id defined in the spine
+    /// Returns the resource content and mime-type by the id defined in the
+    /// spine
     ///
     /// Returns [`None`] if the id doesn't exists in the epub
     pub fn get_resource(&mut self, id: &str) -> Option<(Vec<u8>, String)> {
@@ -299,7 +300,8 @@ impl<R: Read + Seek> EpubDoc<R> {
         self.archive.get_entry_as_str(path).ok()
     }
 
-    /// Returns the resource content and mime-type by the id defined in the spine, as String
+    /// Returns the resource content and mime-type by the id defined in the
+    /// spine, as String
     ///
     /// Returns [`None`] if the id doesn't exists in the epub
     pub fn get_resource_str(&mut self, id: &str) -> Option<(String, String)> {
@@ -375,9 +377,10 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// Returns the current chapter data, with resource uris renamed so they
     /// have the epub:// prefix and all are relative to the root file
     ///
-    /// This method is useful to render the content with a html engine, because inside the epub
-    /// local paths are relatives, so you can provide that content, because the engine will look
-    /// for the relative path in the filesystem and that file isn't there. You should provide files
+    /// This method is useful to render the content with a html engine, because
+    /// inside the epub local paths are relatives, so you can provide that
+    /// content, because the engine will look for the relative path in the
+    /// filesystem and that file isn't there. You should provide files
     /// with epub:// using [`Self::get_resource_by_path`]
     ///
     /// # Examples
@@ -395,7 +398,7 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// assert!(text.contains("epub://OEBPS/Styles/stylesheet.css"));
     /// assert!(text.contains("http://creativecommons.org/licenses/by-sa/3.0/"));
     /// ```
-    ///
+    /// 
     /// # Errors
     ///
     /// Returns [`DocError::InvalidEpub`] if the epub is broken.
@@ -595,8 +598,8 @@ impl<R: Read + Seek> EpubDoc<R> {
     /// Function to convert a resource path to a chapter number in the spine
     /// If the resource isn't in the spine list, None will be returned
     ///
-    /// This method is useful to convert a toc [`NavPoint`] content to a chapter number
-    /// to be able to navigate easily
+    /// This method is useful to convert a toc [`NavPoint`] content to a chapter
+    /// number to be able to navigate easily
     pub fn resource_uri_to_chapter(&self, uri: &PathBuf) -> Option<usize> {
         for (k, (path, _mime)) in &self.resources {
             if path == uri {
@@ -619,8 +622,9 @@ impl<R: Read + Seek> EpubDoc<R> {
         let unique_identifier_id = &root.borrow().get_attr("unique-identifier");
 
         // resources from manifest
-        // This should be run before everything else, because other functions relies on
-        // self.resources and should be filled before calling `fill_toc`
+        // This should be run before everything else, because other functions
+        // relies on self.resources and should be filled before calling
+        // `fill_toc`
         let manifest = root
             .borrow()
             .find("manifest")
@@ -768,7 +772,8 @@ impl<R: Read + Seek> EpubDoc<R> {
         let mut navpoints = Vec::new();
 
         // TODO: get docTitle
-        // TODO: parse metadata (dtb:totalPageCount, dtb:depth, dtb:maxPageNumber)
+        // TODO: parse metadata (dtb:totalPageCount, dtb:depth,
+        // dtb:maxPageNumber)
 
         for nav in &parent.children {
             let item = nav.borrow();
@@ -842,7 +847,8 @@ fn build_epub_uri<P: AsRef<Path>>(path: P, append: &str) -> String {
         };
     }
 
-    // If on Windows, replace all Windows path separators with Unix path separators
+    // If on Windows, replace all Windows path separators with Unix path
+    // separators
     let path = if cfg!(windows) {
         cpath.to_string_lossy().replace('\\', "/")
     } else {

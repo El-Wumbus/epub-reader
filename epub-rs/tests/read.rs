@@ -35,7 +35,8 @@ fn read_doc() {
 #[test]
 fn bad_epub() {
     //book2.epub has a opf encoded in UTF-16
-    //It also has malformed toc, manifest and guide entries, as well as multiple metadata entries
+    //It also has malformed toc, manifest and guide entries, as well as
+    // multiple metadata entries
     let input_file = "tests/docs/book2.epub";
     let doc = EpubDoc::new(input_file);
     assert!(doc.is_ok());

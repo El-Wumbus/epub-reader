@@ -437,6 +437,7 @@ checksum = "583034fd73374156e66797ed8e5b0d5690409c9226b22d87cb7f19821c05d152"
 [[package]]
 name = "slime"
 version = "0.1.0"
+source = "git+https://git.bleeding.pink/decator/slime.git#994deed6ce740adacd257cc761b214fbeaf41cfc"
 
 [[package]]
 name = "syn"
