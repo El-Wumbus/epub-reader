@@ -1,5 +1,6 @@
 const API = {
     QUIT: "/api/quit",
+    KEEPALIVE: "/api/keepalive",
     PAGE: "/api/page",
     FONT_SIZE: "/api/font-size",
     INVERT_TEXT_COLOR: "/api/invert-text-color",
@@ -8,6 +9,10 @@ const API = {
 
 async function api_quit() {
     const response = await fetch(API.QUIT, { method: "POST" });
+}
+
+async function api_keepalive() {
+    const response = await fetch(API.KEEPALIVE, { method: "POST" });
 }
 
 async function api_page(action) {
@@ -52,6 +57,7 @@ async function quit() {
         close();
     }
 }
+
 
 async function keybinds(key) {
     switch (key) {
@@ -114,6 +120,12 @@ frame.addEventListener("load", () => {
             link.target = "_top"; // HTML is stupid and links don't work unless we do this.
         }
     }
+
+    // Every thirty seconds we send a signal to the server so it knows we're reading.
+    window.setInterval(() => {
+        api_keepalive();
+        console.log("Sent keepalive signal");
+    }, 30000);
 });
 
 /*window.addEventListener("load", () => {

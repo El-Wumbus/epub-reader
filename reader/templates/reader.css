@@ -27,7 +27,7 @@
 /** Dynamic variables */
 --background-color: {{ variables.bg_color }};
 --foreground-color: {{ variables.fg_color }};
---content-width: {{ variables.content_width_em }}em;
+--content-width: {{ variables.content_width }}ex;
 --content-font-size: {{ variables.content_font_size_px }}px;
 
 --infobar-font-size: var(--content-font-size);

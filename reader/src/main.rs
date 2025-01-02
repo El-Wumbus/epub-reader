@@ -76,7 +76,7 @@ struct Config<'a> {
 
 impl Config<'_> {
     /// The number of INI fields when serialized.
-    pub const S_FIELDS: usize = 8;
+    pub const S_FIELDS: usize = 9;
     pub const DEFAULT_BIND_ADDR: &'static str = "localhost";
     pub const DEFAULT_BIND_PORT: u16 = 0;
 }
@@ -96,7 +96,7 @@ impl Default for Config<'_> {
 impl<'a> From<&Config<'a>> for [ini::Pair<'a>; Config::S_FIELDS] {
     /// Create serializeable INI key-value pairs for [`Config`].
     fn from(cfg: &Config<'a>) -> Self {
-        let css_variables: [ini::Pair<'a>; 4] = cfg.css_variables.into();
+        let css_variables: [ini::Pair<'a>; 5] = cfg.css_variables.into();
         [
             ini::Pair {
                 section: "",
@@ -122,6 +122,7 @@ impl<'a> From<&Config<'a>> for [ini::Pair<'a>; Config::S_FIELDS] {
             css_variables[1],
             css_variables[2],
             css_variables[3],
+            css_variables[4],
         ]
     }
 }
@@ -158,11 +159,12 @@ impl<'a> TryFrom<ini::Parse<'a>> for Config<'a> {
                         .parse()
                         .map_err(|_| "Invalid content_font_size_px")?;
                 }
-                ("css", "content_width_em") => {
-                    x.css_variables.content_width_em = value
+                ("css", "content_width") => {
+                    x.css_variables.content_width = value
                         .parse()
-                        .map_err(|_| "Invalid content_width_em")?;
+                        .map_err(|_| "Invalid content_width")?;
                 }
+                ("css", "font") => x.css_variables.font = value,
                 _ => {}
             }
         }
@@ -196,24 +198,26 @@ struct ReaderStyles<'a> {
 
 #[derive(Debug, Clone, Copy)]
 struct CSSVariables<'a> {
+    font: &'a str,
     fg_color: &'a str,
     bg_color: &'a str,
-    content_width_em: f32,
+    content_width: f32,
     content_font_size_px: u32,
 }
 
 impl Default for CSSVariables<'_> {
     fn default() -> Self {
         Self {
+            font: "'Iosevka', sans-serif",
             fg_color: "var(--color-primary-a50)",
             bg_color: "var(--color-surface-a0)",
             content_font_size_px: 21,
-            content_width_em: 36.0,
+            content_width: 76.0,
         }
     }
 }
 
-impl<'a> From<CSSVariables<'a>> for [ini::Pair<'a>; 4] {
+impl<'a> From<CSSVariables<'a>> for [ini::Pair<'a>; 5] {
     fn from(vars: CSSVariables<'a>) -> Self {
         [
             ini::Pair {
@@ -235,8 +239,13 @@ impl<'a> From<CSSVariables<'a>> for [ini::Pair<'a>; 4] {
             },
             ini::Pair {
                 section: "css",
-                key: "content_width_em",
-                value: Box::leak(Box::new(vars.content_width_em.to_string())),
+                key: "content_width",
+                value: Box::leak(Box::new(vars.content_width.to_string())),
+            },
+            ini::Pair {
+                section: "css",
+                key: "font",
+                value: Box::leak(Box::new(vars.font.to_string())),
             },
         ]
     }
@@ -593,6 +602,10 @@ fn main() -> Result<(), ()> {
                 quit = true;
                 rcode(200)
             }
+            ("/api/keepalive", &Method::Post) => {
+                debug!("Got keepalive signal from client");
+                rcode(200)
+            }
             ("/api/page", &Method::Post) => {
                 let mut req_body = String::new();
                 // TODO: Stop unwrapping and error handle properly
@@ -690,20 +703,20 @@ fn main() -> Result<(), ()> {
 
                 match req_body.trim() {
                     "+" => {
-                        state.css_variables.content_width_em += 1.0;
+                        state.css_variables.content_width += 1.0;
                         debug!(
                             "Increased content width to {}",
-                            state.css_variables.content_width_em
+                            state.css_variables.content_width
                         );
                         rcode(200)
                     }
                     "-" => {
-                        if state.css_variables.content_width_em > 20.0 {
-                            state.css_variables.content_width_em -= 1.0;
+                        if state.css_variables.content_width > 20.0 {
+                            state.css_variables.content_width -= 1.0;
                         }
                         debug!(
                             "Increased content width to {}",
-                            state.css_variables.content_width_em
+                            state.css_variables.content_width
                         );
                         rcode(200)
                     }

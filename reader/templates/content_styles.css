@@ -27,9 +27,9 @@
 
         --background-color: {{ variables.bg_color }};
         --foreground-color: {{ variables.fg_color }};
-        --content-width: {{ variables.content_width_em }}em;
+        --content-width: {{ variables.content_width }}ex;
         --content-font-size: {{ variables.content_font_size_px }}px;
-        --content-font-family: Iosevka, sans-serif;
+        --content-font-family: {{ variables.font }};
         
 /* TODO disallow overlap between infobar and content*/
     }
