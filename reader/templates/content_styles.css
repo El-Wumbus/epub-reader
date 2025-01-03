@@ -53,3 +53,9 @@
         color: var(--foreground-color) !important;
         /*text-decoration: underline !important;*/
     }
+
+.paragraph-label {
+    position: absolute;
+    left: -15%;
+    font-size: calc(var(--content-font-size) * 0.80);
+}

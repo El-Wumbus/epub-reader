@@ -819,7 +819,9 @@ fn main() {
                             .unwrap();
                             debug!("rendered content styles: {content_styles}");
                             let data = std::str::from_utf8(&data).unwrap();
-                            inject_styles(data, &content_styles).into_bytes()
+                            // TODO: make paragraph numbers usable!!!!
+                            fix_content(data, &content_styles, false)
+                                .into_bytes()
                         } else {
                             data
                         };
@@ -996,9 +998,13 @@ fn main() {
 
 /// Add the `stylesheet` to the end of the XHTML Header found in `src`. This
 /// does nothing if `src` doesn't have an HTML header.
-fn inject_styles(src: &str, stylesheet: &str) -> String {
+fn fix_content(src: &str, stylesheet: &str, paragraph_numbers: bool) -> String {
     use xmlparser::{ElementEnd, Token};
     let mut output = String::with_capacity(src.len() + stylesheet.len());
+    let mut in_paragraph = false;
+    let mut in_body = false;
+    let mut paragraph_count = 0usize;
+
     for token in xmlparser::Tokenizer::from(src) {
         match token {
             Ok(Token::Attribute { span, .. }) => {
@@ -1017,6 +1023,45 @@ fn inject_styles(src: &str, stylesheet: &str) -> String {
                 output.push_str("</style>");
                 output.push('\n');
 
+                output.push_str(span.as_str());
+            }
+            Ok(Token::ElementStart { local, span, .. }) if local == "body" => {
+                in_body = true;
+                output.push_str(span.as_str());
+            }
+            Ok(Token::ElementStart { local, span, .. })
+                if local == "p" && in_body && !in_paragraph =>
+            {
+                in_paragraph = true;
+                output.push_str(span.as_str());
+            }
+            Ok(Token::Text { text, .. })
+                if in_paragraph && !text.as_str().trim().is_empty() =>
+            {
+                if paragraph_numbers {
+                    paragraph_count += 1;
+                    in_paragraph = false;
+                    output.push_str(r#"<span class="paragraph-label">"#);
+                    output.push('¶');
+                    output.push_str(&paragraph_count.to_string());
+                    output.push_str(r#"</span>"#);
+                }
+                output.push_str(text.as_str());
+            }
+            Ok(Token::ElementEnd {
+                end: ElementEnd::Close(_, ename),
+                span,
+                ..
+            }) if ename.as_str() == "p" => {
+                in_paragraph = false;
+                output.push_str(span.as_str());
+            }
+            Ok(Token::ElementEnd {
+                end: ElementEnd::Close(_, ename),
+                span,
+                ..
+            }) if ename.as_str() == "body" => {
+                in_body = false;
                 output.push_str(span.as_str());
             }
             Ok(t) => {
