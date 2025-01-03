@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+    <head>
+        <title>{{ title }}</title>
+        <style type="text/css">
+            body, html {
+                margin: 0;
+                padding: 0;
+                height: 100%;
+                overflow: hidden;
+            }
+
+            {{ stylesheet }}
+            
+            #pageframe {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                right: calc(50% - var(--content-width) / 2);
+                left: calc(50% - var(--content-width) / 2);
+                width: var(--content-width);
+                overflow: none;
+            }
+        </style>
+    </head>
+
+    <body onload="pageform.reset();">
+        <div id="content">
+            <iframe id="pageframe" frameborder="0" height="100%" src="{{ image_url }}"></iframe>
+        </div>
+        <div id="infobar">
+            <div id="pagenumber">
+                    <form id="pageform" action="javascript:navigate_to_page();">
+                        <input id="pageinput" type="text" name="page" value="{{current_page}}"/>
+                </form>/ {{page_count}}</div>
+                <div id="navbuttons">
+                <button id="previous_page_button" onclick="previous_page_button()">Prev</button>
+				<button id="next_page_button" onclick="next_page_button()">Next</button>
+                <button id="quit_button" onclick="quit_button()">Quit</button>
+			</div>
+
+        </div>
+    </body>
+    <script type="application/javascript">
+        {{ javascript }}
+    </script>
+</html>
+

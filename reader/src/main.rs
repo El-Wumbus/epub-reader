@@ -10,15 +10,35 @@ use std::process::exit;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tiny_http::{Header, Method, Request, Response, StatusCode};
+
+mod cba;
+
 pub const XHTML: &str = "application/xhtml+xml";
 pub const HTML: &str = "text/html";
 pub const JSON: &str = "application/json";
 pub const CSS: &str = "text/css";
 const READER_JS: &str = include_str!("reader.js");
 
+#[allow(clippy::large_enum_variant)]
+enum Book {
+    Epub(EpubDoc<Cursor<Vec<u8>>>),
+    Cba(cba::CBAReader),
+}
+
+impl From<cba::CBAReader> for Book {
+    fn from(cba: cba::CBAReader) -> Self {
+        Book::Cba(cba)
+    }
+}
+impl From<EpubDoc<Cursor<Vec<u8>>>> for Book {
+    fn from(epub: EpubDoc<Cursor<Vec<u8>>>) -> Self {
+        Book::Epub(epub)
+    }
+}
+
 /// Application state.
 struct State<'a> {
-    book: EpubDoc<Cursor<Vec<u8>>>,
+    book: Book,
     socket_addr: std::net::SocketAddr,
     css_variables: CSSVariables<'a>,
     current_page: usize,
@@ -26,8 +46,11 @@ struct State<'a> {
 }
 
 impl State<'_> {
-    fn new(book: EpubDoc<Cursor<Vec<u8>>>) -> Self {
-        let page_count = book.get_num_pages();
+    fn new(book: Book) -> Self {
+        let page_count = match &book {
+            Book::Epub(epub) => epub.get_num_pages(),
+            Book::Cba(cba) => cba.page_count(),
+        };
         Self {
             book,
             socket_addr: std::net::SocketAddr::new(
@@ -48,20 +71,31 @@ impl State<'_> {
         self.current_page = pred(self.current_page, self.page_count)
             .clamp(0, self.page_count - 1);
 
-        assert!(
-            self.book.set_current_page(self.current_page),
-            "page index should be valid"
-        );
-        let path = self.book.get_current_path().ok_or(())?;
-        let path = path.to_str().unwrap(); // TODO: Does epub-rs convert utf16 paths to utf8? Epubs
-        // are garuenteed to be one of these.
-        debug!(
-            "Moved to page: {}/{} at path \"{}\"",
-            self.current_page + 1,
-            self.page_count,
-            path
-        );
-        Ok(Response::from_string(path))
+        match &mut self.book {
+            Book::Epub(epub) => {
+                assert!(
+                    epub.set_current_page(self.current_page),
+                    "page index should be valid"
+                );
+                let path = epub.get_current_path().ok_or(())?;
+                let path = path.to_str().unwrap(); // TODO: Does epub-rs convert utf16 paths to utf8? Epubs
+                // are garuenteed to be one of these.
+                debug!(
+                    "Moved to page: {}/{} at path \"{}\"",
+                    self.current_page + 1,
+                    self.page_count,
+                    path
+                );
+                Ok(Response::from_string(path))
+            }
+            Book::Cba(cba) => {
+                assert!(
+                    cba.set_current_page(self.current_page).is_some(),
+                    "page index should be valid"
+                );
+                Ok(Response::from_string(self.current_page.to_string()))
+            }
+        }
     }
 }
 
@@ -160,9 +194,8 @@ impl<'a> TryFrom<ini::Parse<'a>> for Config<'a> {
                         .map_err(|_| "Invalid content_font_size_px")?;
                 }
                 ("css", "content_width") => {
-                    x.css_variables.content_width = value
-                        .parse()
-                        .map_err(|_| "Invalid content_width")?;
+                    x.css_variables.content_width =
+                        value.parse().map_err(|_| "Invalid content_width")?;
                 }
                 ("css", "font") => x.css_variables.font = value,
                 _ => {}
@@ -180,6 +213,17 @@ struct Reader<'a> {
     stylesheet: &'a str,
     javascript: &'a str,
     page_url: &'a str,
+    current_page: usize,
+    page_count: usize,
+}
+
+#[derive(Debug, Template)]
+#[template(ext = "xhtml", path = "cbreader.xml")]
+struct CBReader<'a> {
+    title: &'a str,
+    stylesheet: &'a str,
+    javascript: &'a str,
+    image_url: &'a str,
     current_page: usize,
     page_count: usize,
 }
@@ -340,7 +384,7 @@ fn parse_args(config: &mut Config) -> Vec<String> {
 
 fn print_usage() {
     let program_name = std::env::args()
-        .nth(0)
+        .next()
         .unwrap_or_else(|| String::from("epub-reader"));
     let program_name = std::path::PathBuf::from(program_name);
     let program_name = program_name
@@ -362,7 +406,7 @@ fn print_usage() {
                         default_bind_port = Config::DEFAULT_BIND_PORT);
 }
 
-fn main() -> Result<(), ()> {
+fn main() {
     fn respond<R: std::io::Read>(request: Request, response: Response<R>) {
         let request_url = request.url().to_string();
 
@@ -384,17 +428,14 @@ fn main() -> Result<(), ()> {
     }
 
     env_logger::Builder::from_env("READER_LOG")
-        .filter_level(log::LevelFilter::Info)
+        .filter_level(log::LevelFilter::Debug)
         .write_style(env_logger::fmt::WriteStyle::Always)
         .init();
 
     let config = Config::default();
-    let config_home = match slime::xdg::Dirs::config_home_dir() {
-        Some(h) => h,
-        None => {
-            error!("FATAL: Couldn't find config directory!");
-            exit(1);
-        }
+    let Some(config_home) = slime::xdg::Dirs::config_home_dir() else {
+        error!("FATAL: Couldn't find config directory!");
+        exit(1);
     };
     let config_file = config_home.join("epub-reader").join("config.ini");
     debug!("Using \"{}\" as config file", config_file.display());
@@ -460,41 +501,59 @@ fn main() -> Result<(), ()> {
         exit(1);
     };
 
-    let book = match std::fs::File::open(&book_arg).and_then(|mut f| {
-        let mut bookbuf = vec![];
-        f.read_to_end(&mut bookbuf)?;
-        Ok(bookbuf)
+    let book_path: &std::path::Path = book_arg.as_ref();
+    let book: Book = if book_path.extension().is_some_and(|x| {
+        x.to_str()
+            .map(str::to_lowercase)
+            .is_some_and(|x| x == "epub")
     }) {
-        Ok(book) => match EpubDoc::from_reader(Cursor::new(book)) {
-            Ok(b) => b,
+        debug!("Reading {book_path:?} as EPUB");
+        match std::fs::File::open(&book_arg).and_then(|mut f| {
+            let mut bookbuf = vec![];
+            f.read_to_end(&mut bookbuf)?;
+            Ok(bookbuf)
+        }) {
+            Ok(book) => match EpubDoc::from_reader(Cursor::new(book)) {
+                Ok(b) => b.into(),
+                Err(e) => {
+                    error!(
+                        "FATAL: Failed to read provided file \"{book_arg}\": {e}"
+                    );
+                    exit(1);
+                }
+            },
             Err(e) => {
                 error!(
-                    "FATAL: Failed to read provided file \"{book_arg}\": {e}"
+                    "FATAL: Failed to open provided book file \"{book_arg}\": {e}"
                 );
                 exit(1);
             }
-        },
-        Err(e) => {
-            error!(
-                "FATAL: Failed to open provided book file \"{book_arg}\": {e}"
-            );
-            exit(1);
+        }
+    } else {
+        debug!("Reading {book_path:?} as Comic Book Archive");
+        match cba::CBAReader::read(book_arg.as_ref()) {
+            Ok(cba) => cba.into(),
+            Err(e) => {
+                error!(
+                    "FATAL: failed to read provided book \"{book_arg}\": {e}"
+                );
+                exit(1);
+            }
         }
     };
-    debug!(
-        "Metadata: {:#?}\nSpine: {:#?}\nResources = {:#?}\n",
-        book.metadata, book.spine, book.resources
-    );
 
-    let book_title = book
-        .metadata
-        .get("title")
-        .into_iter()
-        .flatten()
-        .map(String::as_str)
-        .next()
-        .unwrap_or("Missing Title")
-        .to_string();
+    let book_title = match &book {
+        Book::Epub(epub) => epub
+            .metadata
+            .get("title")
+            .into_iter()
+            .flatten()
+            .map(String::as_str)
+            .next()
+            .unwrap_or("Missing Title")
+            .to_string(),
+        Book::Cba(_cba) => String::from("Missing Title"),
+    };
 
     let mut state = State::new(book);
     state.css_variables = config.css_variables;
@@ -511,7 +570,7 @@ fn main() -> Result<(), ()> {
         };
     state.socket_addr = server.server_addr().to_ip().unwrap();
     info!(
-        "Bound server to {}:{}",
+        "Server listening at http://{}:{}",
         config.bind_addr,
         state.socket_addr.port()
     );
@@ -583,10 +642,22 @@ fn main() -> Result<(), ()> {
             request_url
         );
         let response = match (request_url.as_str(), request.method()) {
-            ("/", &Method::Get) | ("/reader", &Method::Get) => {
+            ("/" | "/reader", &Method::Get) => {
                 // Redirect to the current page
-                assert!(state.book.set_current_page(state.current_page));
-                let page_url = state.book.get_current_path().unwrap();
+                let page_url = match &mut state.book {
+                    Book::Epub(epub) => {
+                        assert!(epub.set_current_page(state.current_page));
+                        epub.get_current_path().unwrap()
+                    }
+                    Book::Cba(cba) => {
+                        assert!(
+                            cba.set_current_page(state.current_page).is_some()
+                        );
+                        std::path::PathBuf::from(
+                            cba.get_current_page().to_string(),
+                        )
+                    }
+                };
                 Response::from_data([])
                     .with_status_code(StatusCode(307))
                     .with_header(
@@ -725,101 +796,195 @@ fn main() -> Result<(), ()> {
             }
             (content, &Method::Get) if content.starts_with("/content/") => {
                 let content = content.strip_prefix("/content/").unwrap();
-                let (Some(data), Some(mime)) = (
-                    state.book.get_resource_by_path(content),
-                    state.book.get_resource_mime_by_path(content),
-                ) else {
-                    request
-                        .respond(
-                            Response::from_string("404")
-                                .with_status_code(StatusCode(404)),
-                        )
-                        .unwrap();
-                    continue;
-                };
+                match &mut state.book {
+                    Book::Epub(epub) => {
+                        let (Some(data), Some(mime)) = (
+                            epub.get_resource_by_path(content),
+                            epub.get_resource_mime_by_path(content),
+                        ) else {
+                            request
+                                .respond(
+                                    Response::from_string("404")
+                                        .with_status_code(StatusCode(404)),
+                                )
+                                .unwrap();
+                            continue;
+                        };
 
-                let data = if mime == XHTML || mime == HTML {
-                    let content_styles = ContentStyles {
-                        variables: state.css_variables,
+                        let data = if mime == XHTML || mime == HTML {
+                            let content_styles = ContentStyles {
+                                variables: state.css_variables,
+                            }
+                            .render()
+                            .unwrap();
+                            debug!("rendered content styles: {content_styles}");
+                            let data = std::str::from_utf8(&data).unwrap();
+                            inject_styles(data, &content_styles).into_bytes()
+                        } else {
+                            data
+                        };
+                        Response::from_data(data).with_header(
+                            Header::from_bytes(
+                                b"Content-Type",
+                                mime.as_bytes(),
+                            )
+                            .expect("no header?"),
+                        )
                     }
-                    .render()
-                    .unwrap();
-                    debug!("rendered content styles: {content_styles}");
-                    let data = std::str::from_utf8(&data).unwrap();
-                    inject_styles(data, &content_styles).into_bytes()
-                } else {
-                    data
-                };
-                Response::from_data(data).with_header(
-                    Header::from_bytes(b"Content-Type", mime.as_bytes())
-                        .expect("no header?"),
-                )
+                    Book::Cba(cba) => {
+                        let Ok(page_num) = content.parse::<usize>() else {
+                            error!(
+                                "Failed to parse page number from /content url (\"{content}\")"
+                            );
+                            respond(
+                                request,
+                                Response::new_empty(StatusCode(404)),
+                            );
+                            continue;
+                        };
+
+                        match cba.page(page_num) {
+                            Ok((contents, mime)) => {
+                                Response::from_data(contents).with_header(
+                                    Header::from_bytes(
+                                        b"Content-Type",
+                                        mime.to_string().as_bytes(),
+                                    )
+                                    .expect("no head?"),
+                                )
+                            }
+                            Err(e) => {
+                                error!(
+                                    "Failed to get page \"{page_num}\" from CBA: {e}"
+                                );
+                                respond(
+                                    request,
+                                    Response::new_empty(StatusCode(500)),
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                }
             }
             (req_url, &Method::Get) => {
                 let req_url =
                     std::path::PathBuf::from(req_url.trim_start_matches('/'));
-                let abs_url = if req_url.starts_with(&state.book.root_base) {
-                    req_url
-                } else {
-                    state.book.root_base.join(req_url)
-                };
 
-                if let Some(idx) = state.book.resource_uri_to_chapter(&abs_url)
-                {
-                    if idx != state.current_page {
-                        state.current_page = idx;
-                        debug!(
-                            "Set page to {} / {}",
-                            state.current_page + 1,
-                            state.page_count
-                        );
+                match &mut state.book {
+                    Book::Epub(epub) => {
+                        let abs_url = if req_url.starts_with(&epub.root_base) {
+                            req_url
+                        } else {
+                            epub.root_base.join(req_url)
+                        };
+
+                        if let Some(idx) =
+                            epub.resource_uri_to_chapter(&abs_url)
+                        {
+                            if idx != state.current_page {
+                                state.current_page = idx;
+                                debug!(
+                                    "Set page to {} / {}",
+                                    state.current_page + 1,
+                                    state.page_count
+                                );
+                            }
+                            assert!(
+                                epub.set_current_page(state.current_page),
+                                "{} should be valid",
+                                state.current_page
+                            );
+                            let Some(page_path) = epub.get_current_path()
+                            else {
+                                respond(request, rcode(500));
+                                continue;
+                            };
+                            let page_url = std::path::PathBuf::from("/content")
+                                .join(page_path);
+                            let page_url = page_url.to_str().unwrap();
+
+                            let stylesheet = ReaderStyles {
+                                variables: state.css_variables,
+                            }
+                            .render()
+                            .unwrap();
+                            let rv = Reader {
+                                title: &book_title,
+                                stylesheet: &stylesheet,
+                                javascript: READER_JS,
+                                page_url,
+
+                                current_page: state.current_page + 1,
+                                page_count: state.page_count,
+                            };
+                            Response::from_string(
+                                rv.render().expect("thing inside thing"),
+                            )
+                            .with_header(
+                                Header::from_bytes(b"Content-Type", XHTML)
+                                    .unwrap(),
+                            )
+                        } else {
+                            let (Some(data), Some(mime)) = (
+                                epub.get_resource_by_path(&abs_url),
+                                epub.get_resource_mime_by_path(&abs_url),
+                            ) else {
+                                request.respond(rcode(404)).unwrap();
+                                continue;
+                            };
+
+                            Response::from_data(data).with_header(
+                                Header::from_bytes(
+                                    b"Content-Type",
+                                    mime.as_bytes(),
+                                )
+                                .expect("no header?"),
+                            )
+                        }
                     }
-                    assert!(
-                        state.book.set_current_page(state.current_page),
-                        "{} should be valid",
-                        state.current_page
-                    );
-                    let Some(page_path) = state.book.get_current_path() else {
-                        respond(request, rcode(500));
-                        continue;
-                    };
-                    let page_url =
-                        std::path::PathBuf::from("/content").join(page_path);
-                    let page_url = page_url.to_str().unwrap();
+                    Book::Cba(cba) => {
+                        let Some(req_url) = req_url.to_str() else {
+                            respond(
+                                request,
+                                Response::new_empty(StatusCode(404)),
+                            );
+                            continue;
+                        };
+                        let Ok(page_num) = req_url.parse::<usize>() else {
+                            respond(
+                                request,
+                                Response::new_empty(StatusCode(404)),
+                            );
+                            continue;
+                        };
+                        state.current_page = page_num;
+                        cba.set_current_page(state.current_page);
 
-                    let stylesheet = ReaderStyles {
-                        variables: state.css_variables,
+                        let stylesheet = ReaderStyles {
+                            variables: state.css_variables,
+                        }
+                        .render()
+                        .unwrap();
+                        let image_url = std::path::PathBuf::from("/content")
+                            .join(page_num.to_string());
+                        let image_url = image_url.to_str().unwrap();
+
+                        let rv = CBReader {
+                            title: &book_title,
+                            stylesheet: &stylesheet,
+                            javascript: READER_JS,
+                            image_url,
+                            current_page: state.current_page + 1,
+                            page_count: state.page_count,
+                        };
+                        Response::from_string(
+                            rv.render().expect("thing inside thing"),
+                        )
+                        .with_header(
+                            Header::from_bytes(b"Content-Type", XHTML).unwrap(),
+                        )
                     }
-                    .render()
-                    .unwrap();
-                    let rv = Reader {
-                        title: &book_title,
-                        stylesheet: &stylesheet,
-                        javascript: READER_JS,
-                        page_url,
-
-                        current_page: state.current_page + 1,
-                        page_count: state.page_count,
-                    };
-                    Response::from_string(
-                        rv.render().expect("thing inside thing"),
-                    )
-                    .with_header(
-                        Header::from_bytes(b"Content-Type", XHTML).unwrap(),
-                    )
-                } else {
-                    let (Some(data), Some(mime)) = (
-                        state.book.get_resource_by_path(&abs_url),
-                        state.book.get_resource_mime_by_path(&abs_url),
-                    ) else {
-                        request.respond(rcode(404)).unwrap();
-                        continue;
-                    };
-
-                    Response::from_data(data).with_header(
-                        Header::from_bytes(b"Content-Type", mime.as_bytes())
-                            .expect("no header?"),
-                    )
                 }
             }
             _ => rcode(404),
@@ -827,8 +992,6 @@ fn main() -> Result<(), ()> {
 
         respond(request, response);
     }
-
-    Ok(())
 }
 
 /// Add the `stylesheet` to the end of the XHTML Header found in `src`. This
