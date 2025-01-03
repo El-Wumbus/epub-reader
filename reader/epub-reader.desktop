@@ -2,9 +2,9 @@
 Type=Application
 Version=1.0
 Name=epub-reader
-Comment=A simple epub-reading server
-# Run the server such that it stops if it doesn't recive any requests within five minutes.
-Exec=epub-reader -open-in-browser true -kill-timeout 8 %f
+Comment=A simple epub-reader
+# Run the server such that it stops if it doesn't recive any requests within four minutes.
+Exec=epub-reader -open-in-browser true -kill-timeout 4 %f
 Terminal=false
 #NoDisplay=true
 
